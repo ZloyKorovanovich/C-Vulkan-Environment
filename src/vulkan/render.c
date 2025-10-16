@@ -83,9 +83,7 @@
 b32 renderRun(UpdateCallback update_callback, EventCallback event_callback) {
     b32 result;
     VulkanContext vulkan_context;
-    QueueContext queue_context;
-    getQueueContext(&vulkan_context);
-    getVulkanContext(&queue_context);
+    getVulkanContext(&vulkan_context);
     
     u32 command_pool_count = queue_context.queue_count;
     VkCommandPool* command_pools = alloca(sizeof(VkCommandPool) * queue_context.queue_count);

@@ -96,32 +96,28 @@ const u32 c_queue_flags[] = DEVICE_QUEUE_FLAGS;
 const u32 c_device_extension_count = DEVICE_EXTENSION_COUNT;
 const char* c_device_extensions[] = DEVICE_EXTENSIONS;
 
-const VkPhysicalDeviceFeatures c_device_features = (VkPhysicalDeviceFeatures){0};
+const VkPhysicalDeviceFeatures c_device_features = DEVICE_FEATURES;
 
-static EventCallback s_callback = NULL;
-static GLFWwindow* s_window = NULL;
-static VkInstance s_instance = NULL;
-static VkSurfaceKHR s_surface = NULL;
+static EventCallback s_callback;
 
-static VkPhysicalDevice s_physical_device = NULL;
-static VkDevice s_device = NULL;
-
-static void* s_buffer_storage = NULL; // storage used instead of runtime array allocations for temporary tasks
 static VkDebugUtilsMessengerEXT s_debug_messenger = NULL; // active only if initialized with debug flag
-
 static PFN_vkCreateDebugUtilsMessengerEXT ext_create_debug_messenger = NULL;
 static PFN_vkDestroyDebugUtilsMessengerEXT ext_destroy_debug_messenger = NULL;
 
-static Queue s_queue_locators[DEVICE_QUEUE_COUNT] = {0};
+static QueueLocator s_queue_locators[DEVICE_QUEUE_COUNT] = {0};
 static VkQueue s_vulkan_queues[DEVICE_QUEUE_COUNT] = {0};
 
-static VkSwapchainKHR s_swapchain = NULL;
 static SwapchainDscr s_swapchain_descriptor = (SwapchainDscr){0};
-
 static u32 s_swapchain_image_count = SWAPCHAIN_MAX_IMAGE_COUNT;
 static VkImage s_swapchain_images[SWAPCHAIN_MAX_IMAGE_COUNT] = {0};
 static VkImageView s_swapchain_views[SWAPCHAIN_MAX_IMAGE_COUNT] = {0};
 
+
+static VulkanContext s_vulkan_context = (VulkanContext) {
+    .queue_locators = s_queue_locators,
+    .queues = s_vulkan_queues
+};
+static ExtContext s_ext_context = (ExtContext){0};
 
 b32 defaultCallback(u32 code) {
     return 1;
@@ -198,7 +194,7 @@ void debugPhysicalDevice(VkPhysicalDevice device) {
 }
 */
 
-b32 layoutDeviceQueues(VkPhysicalDevice device, u32 queue_count, const u32* queue_flags, Queue* const queue_ids) {
+b32 layoutDeviceQueues(VkPhysicalDevice device, u32 queue_count, const u32* queue_flags, QueueLocator* const queue_ids) {
     u32 queue_family_count;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, NULL);
     VkQueueFamilyProperties* queue_families = ZE_ALLOCA(sizeof(VkQueueFamilyProperties) * queue_family_count);
@@ -213,7 +209,7 @@ b32 layoutDeviceQueues(VkPhysicalDevice device, u32 queue_count, const u32* queu
             if(flags == (queue_families[i].queueFlags & DEVICE_QUEUE_FLAG_MASK) && queue_families[i].queueCount > occupied_queues[j]) {
                 found_queues++;
                 if(queue_ids) {
-                    queue_ids[i] = (Queue) {
+                    queue_ids[i] = (QueueLocator) {
                         .family_id = j,
                         .local_id = occupied_queues[j]
                     };
@@ -289,7 +285,7 @@ u32 rateDeviceScore(VkPhysicalDevice device, u32* const device_id) {
 }
 
 // you need to specify  per-family info for VkDeviceQueueCreateInfo, not per-queue info
-void combineQueuesToFamilies(u32 queue_count, const Queue* queues, u32* const family_count, Queue* const families) {
+void combineQueuesToFamilies(u32 queue_count, const QueueLocator* queues, u32* const family_count, QueueLocator* const families) {
     u32 family_number = 0;
     for(u32 i = 0; i < queue_count; i++) {
         for(u32 j = 0; j < family_number; j++) {
@@ -298,7 +294,7 @@ void combineQueuesToFamilies(u32 queue_count, const Queue* queues, u32* const fa
                 goto _found;
             }
         }
-        families[family_number] = (Queue) {
+        families[family_number] = (QueueLocator) {
             .family_id = queues[i].family_id,
             .local_id = 1
         };
@@ -354,24 +350,24 @@ void getScreenDescriptor(GLFWwindow* window, VkSurfaceKHR surface, VkPhysicalDev
 // ================================================ RENDER INTERFACE
 // =================================================================
 
-#define LOAD_EXT_FUNC(pfn, name)                                \
-pfn = (void*)vkGetInstanceProcAddr(s_instance, #name);          \
-if(!pfn) {                                                      \
-    INVOKE_CALLBACK(VK_ERR_LOAD_EXT_PFN)                        \
+#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code)
+#define _LOAD_EXT_FUNC(pfn, name)                                               \
+pfn = (void*)vkGetInstanceProcAddr(s_vulkan_context.instance, #name);           \
+if(!pfn) {                                                                      \
+    _INVOKE_CALLBACK(VK_ERR_LOAD_EXT_PFN)                                       \
 }
 
 b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     // necessary to do the work and handle VK_ERRs
     s_callback = callback ? callback : &defaultCallback;
-    s_buffer_storage = malloc(1048576); // 1 mb
 
     // creating window
     if(!glfwInit()) {
-        INVOKE_CALLBACK(VK_ERR_GLFW_INIT)
+        _INVOKE_CALLBACK(VK_ERR_GLFW_INIT)
     }
-    s_window = createWindow(width, height, flags, "vulkan_window");
-    if(!s_window) {
-        INVOKE_CALLBACK(VK_ERR_WINDOW_CREATE)
+    s_vulkan_context.window = createWindow(width, height, flags, "vulkan_window");
+    if(!s_vulkan_context.window) {
+        _INVOKE_CALLBACK(VK_ERR_WINDOW_CREATE)
     }
 
     // checking layers and extensions support and loading them 
@@ -398,10 +394,10 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         u32 debug_extension_count = glfw_extension_count + c_vulkan_extension_count_debug; 
 
         if(!checkVulkanLayerSupport(c_vulkan_layer_count, c_vulkan_layers)) {
-            INVOKE_CALLBACK(VK_ERR_DEBUG_LAYERS_NOT_PRESENT)
+            _INVOKE_CALLBACK(VK_ERR_DEBUG_LAYERS_NOT_PRESENT)
         }
         if(!checkVulkanExtensionsSupport(debug_extension_count, instance_extensions)) {
-            INVOKE_CALLBACK(VK_ERR_EXT_NOT_PRESENT)
+            _INVOKE_CALLBACK(VK_ERR_EXT_NOT_PRESENT)
         }
         VkDebugUtilsMessengerCreateInfoEXT debug_info = (VkDebugUtilsMessengerCreateInfoEXT) {
             .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
@@ -419,20 +415,20 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
             .ppEnabledLayerNames = c_vulkan_layers,
             .pNext = &debug_info
         };
-        if(vkCreateInstance(&instance_info, NULL, &s_instance) != VK_SUCCESS) {
-            INVOKE_CALLBACK(VK_ERR_INSTANCE_CREATE)
+        if(vkCreateInstance(&instance_info, NULL, &s_vulkan_context.instance) != VK_SUCCESS) {
+            _INVOKE_CALLBACK(VK_ERR_INSTANCE_CREATE)
         }
 
-        LOAD_EXT_FUNC(ext_create_debug_messenger, vkCreateDebugUtilsMessengerEXT)
-        LOAD_EXT_FUNC(ext_destroy_debug_messenger, vkDestroyDebugUtilsMessengerEXT)
+        _LOAD_EXT_FUNC(ext_create_debug_messenger, vkCreateDebugUtilsMessengerEXT)
+        _LOAD_EXT_FUNC(ext_destroy_debug_messenger, vkDestroyDebugUtilsMessengerEXT)
 
-        if(ext_create_debug_messenger(s_instance, &debug_info, NULL, &s_debug_messenger) != VK_SUCCESS) {
-            INVOKE_CALLBACK(VK_ERR_DEBUG_MESSENGER_CREATE)
+        if(ext_create_debug_messenger(s_vulkan_context.instance, &debug_info, NULL, &s_debug_messenger) != VK_SUCCESS) {
+            _INVOKE_CALLBACK(VK_ERR_DEBUG_MESSENGER_CREATE)
         }
     } else {
         u32 extension_count = glfw_extension_count + c_vulkan_extension_count;
         if(!checkVulkanExtensionsSupport(extension_count, instance_extensions)) {
-            INVOKE_CALLBACK(VK_ERR_EXT_NOT_PRESENT)
+            _INVOKE_CALLBACK(VK_ERR_EXT_NOT_PRESENT)
         }
         VkInstanceCreateInfo instance_info = (VkInstanceCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -444,26 +440,26 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
             .ppEnabledLayerNames = NULL,
             .pNext = NULL
         };
-        if(vkCreateInstance(&instance_info, NULL, &s_instance) != VK_SUCCESS) {
-            INVOKE_CALLBACK(VK_ERR_INSTANCE_CREATE)
+        if(vkCreateInstance(&instance_info, NULL, &s_vulkan_context.instance) != VK_SUCCESS) {
+            _INVOKE_CALLBACK(VK_ERR_INSTANCE_CREATE)
         }
     }
 
-    if(glfwCreateWindowSurface(s_instance, s_window, NULL, &s_surface) != VK_SUCCESS) {
-        INVOKE_CALLBACK(VK_ERR_SURFACE_CREATE)
+    if(glfwCreateWindowSurface(s_vulkan_context.instance, s_vulkan_context.window, NULL, &s_vulkan_context.surface) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_SURFACE_CREATE)
     }
 
     // device selection
     u32 vk_device_count;
-    vkEnumeratePhysicalDevices(s_instance, &vk_device_count, NULL);
+    vkEnumeratePhysicalDevices(s_vulkan_context.instance, &vk_device_count, NULL);
     if(vk_device_count == 0) {
-        INVOKE_CALLBACK(VK_ERR_NO_GPU)
+        _INVOKE_CALLBACK(VK_ERR_NO_GPU)
     }
     VkPhysicalDevice* vk_devices = alloca(sizeof(VkPhysicalDevice) * vk_device_count);
-    vkEnumeratePhysicalDevices(s_instance, &vk_device_count, vk_devices);
+    vkEnumeratePhysicalDevices(s_vulkan_context.instance, &vk_device_count, vk_devices);
 
     // bootstrap in unknown environment
-    s_physical_device = NULL;
+    s_vulkan_context.physical_device = NULL;
     u32 best_score = 0;
     for(u32 i = 0; i < vk_device_count; i++) {
         VkPhysicalDevice vk_physical_device = vk_devices[i];
@@ -472,18 +468,18 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         if(!checkDeviceFeatures(vk_physical_device, &c_device_features)) continue;
         u32 score = rateDeviceScore(vk_physical_device, NULL);
         if(score >= best_score) {
-            s_physical_device = vk_physical_device;
+            s_vulkan_context.physical_device = vk_physical_device;
             best_score = score;
         }
     }
-    if(!s_physical_device) {
-        INVOKE_CALLBACK(VK_ERR_NO_SUITABLE_GPU)
+    if(!s_vulkan_context.physical_device) {
+        _INVOKE_CALLBACK(VK_ERR_NO_SUITABLE_GPU)
     }
 
     // queue layout for device create info
-    layoutDeviceQueues(s_physical_device, c_queue_count, c_queue_flags, s_queue_locators);
+    layoutDeviceQueues(s_vulkan_context.physical_device, c_queue_count, c_queue_flags, s_queue_locators);
     u32 queue_family_count = 0;
-    Queue* queue_families = alloca(sizeof(Queue) * c_queue_count);
+    QueueLocator* queue_families = alloca(sizeof(QueueLocator) * c_queue_count);
     combineQueuesToFamilies(c_queue_count, s_queue_locators, &queue_family_count, queue_families);
     
     VkDeviceQueueCreateInfo* queue_infos = alloca(sizeof(VkDeviceQueueCreateInfo) * c_queue_count);
@@ -513,18 +509,29 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         .pEnabledFeatures = &c_device_features,
         .pNext = &dynamic_rendering_feature
     };
-    if(vkCreateDevice(s_physical_device, &device_create_info, NULL, &s_device) != VK_SUCCESS) {
-        INVOKE_CALLBACK(VK_ERR_DEVICE_CREATE)
+    if(vkCreateDevice(s_vulkan_context.physical_device, &device_create_info, NULL, &s_vulkan_context.device) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_DEVICE_CREATE)
     }
     for(u32 i = 0; i < c_queue_count; i++) {
-        vkGetDeviceQueue(s_device, s_queue_locators[i].family_id, s_queue_locators[i].local_id, s_vulkan_queues + i);
+        vkGetDeviceQueue(s_vulkan_context.device, s_queue_locators[i].family_id, s_queue_locators[i].local_id, s_vulkan_queues + i);
     }
 
+    // device extesnions loading
+
+    _LOAD_EXT_FUNC(s_ext_context.create_shaders, vkCreateShadersEXT)
+    _LOAD_EXT_FUNC(s_ext_context.destroy_shader, vkDestroyShaderEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_bind_shaders, vkCmdBindShadersEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_cull_mode, vkCmdSetCullModeEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_depth_write_enable, vkCmdSetDepthWriteEnableEXT)
+    
+    _LOAD_EXT_FUNC(s_ext_context.cmd_begin_rendering, vkCmdBeginRenderingKHR)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_end_rendering, vkCmdEndRenderingKHR)
+
     // swapchain creation
-    getScreenDescriptor(s_window, s_surface, s_physical_device, &s_swapchain_descriptor);
+    getScreenDescriptor(s_vulkan_context.window, s_vulkan_context.surface, s_vulkan_context.physical_device, &s_swapchain_descriptor);
     VkSwapchainCreateInfoKHR swapchain_info = (VkSwapchainCreateInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = s_surface,
+        .surface = s_vulkan_context.surface,
         .minImageCount = s_swapchain_descriptor.min_image_count,
         .imageFormat = s_swapchain_descriptor.color_format.format,
         .imageColorSpace = s_swapchain_descriptor.color_format.colorSpace,
@@ -537,12 +544,15 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         .presentMode = s_swapchain_descriptor.present_mode,
         .clipped = TRUE
     };
-    if(vkCreateSwapchainKHR(s_device, &swapchain_info, NULL, &s_swapchain) != VK_SUCCESS) {
-        INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
+    if(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_vulkan_context.swapchain) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
     }
 
-    vkGetSwapchainImagesKHR(s_device, s_swapchain, &s_swapchain_image_count, NULL);
-    vkGetSwapchainImagesKHR(s_device, s_swapchain, &s_swapchain_image_count, s_swapchain_images);
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, NULL);
+    if(s_swapchain_image_count > SWAPCHAIN_MAX_IMAGE_COUNT) {
+        _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_TOO_MANY_IMAGES)
+    }
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, s_swapchain_images);
     VkImageViewCreateInfo view_info = (VkImageViewCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = NULL, // set in for loop
@@ -560,8 +570,8 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     };
     for(u32 i = 0; i < s_swapchain_image_count; i++) {
         view_info.image = s_swapchain_images[i];
-        if(vkCreateImageView(s_device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
-            INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
+        if(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
+            _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
         }
     }
 
@@ -573,38 +583,43 @@ _fail:
 
 void renderTerminate(void) {
     for(u32 i = 0; i < s_swapchain_image_count; i++) {
-        SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_device, s_swapchain_views[i], NULL))
+        SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_views[i], NULL))
     }
-    SAFE_DESTROY(s_swapchain, vkDestroySwapchainKHR(s_device, s_swapchain, NULL))
-    SAFE_DESTROY(s_device, vkDestroyDevice(s_device, NULL))
-    SAFE_DESTROY(s_surface, vkDestroySurfaceKHR(s_instance, s_surface, NULL))
+    SAFE_DESTROY(s_vulkan_context.swapchain, vkDestroySwapchainKHR(s_vulkan_context.device, s_vulkan_context.swapchain, NULL))
+
+    s_ext_context = (ExtContext){0}; // set extension ptrs to NULL
+
+    SAFE_DESTROY(s_vulkan_context.device, vkDestroyDevice(s_vulkan_context.device, NULL))
+    SAFE_DESTROY(s_vulkan_context.surface, vkDestroySurfaceKHR(s_vulkan_context.instance, s_vulkan_context.surface, NULL))
     if(s_debug_messenger) {
-        ext_destroy_debug_messenger(s_instance, s_debug_messenger, NULL);
+        ext_destroy_debug_messenger(s_vulkan_context.instance, s_debug_messenger, NULL);
         ext_create_debug_messenger = NULL;
         ext_destroy_debug_messenger = NULL;
     }
-    SAFE_DESTROY(s_instance, vkDestroyInstance(s_instance, NULL))
-    SAFE_DESTROY(s_window, glfwDestroyWindow(s_window))
-    glfwTerminate();
+    
+    ext_create_debug_messenger = NULL;
+    ext_destroy_debug_messenger = NULL;
 
-    Z_FREE(s_buffer_storage);
+    SAFE_DESTROY(s_vulkan_context.instance, vkDestroyInstance(s_vulkan_context.instance, NULL))
+    SAFE_DESTROY(s_vulkan_context.window, glfwDestroyWindow(s_vulkan_context.window))
+    glfwTerminate();
 }
 
 // this function should be called when window is resized
 b32 recreateSwapchain(void) {
     for(u32 i = 0; i < s_swapchain_image_count; i++) {
-        SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_device, s_swapchain_views[i], NULL))
+        SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_views[i], NULL))
     }
-    SAFE_DESTROY(s_swapchain, vkDestroySwapchainKHR(s_device, s_swapchain, NULL))
+    SAFE_DESTROY(s_vulkan_context.swapchain, vkDestroySwapchainKHR(s_vulkan_context.device, s_vulkan_context.swapchain, NULL))
 
     i32 width, height;
-    glfwGetFramebufferSize(s_window, &width, &height);
+    glfwGetFramebufferSize(s_vulkan_context.window, &width, &height);
     while (width == 0 || height == 0) {
-        glfwGetFramebufferSize(s_window, &width, &height);
+        glfwGetFramebufferSize(s_vulkan_context.window, &width, &height);
         glfwWaitEvents();
     }
     VkSurfaceCapabilitiesKHR capabilities;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(s_physical_device, s_surface, &capabilities);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(s_vulkan_context.physical_device, s_vulkan_context.surface, &capabilities);
     s_swapchain_descriptor.extent = (VkExtent2D){
         .width = CLAMP((u32)width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
         .height = CLAMP((u32)height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
@@ -612,7 +627,7 @@ b32 recreateSwapchain(void) {
     
     VkSwapchainCreateInfoKHR swapchain_info = (VkSwapchainCreateInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .surface = s_surface,
+        .surface = s_vulkan_context.surface,
         .minImageCount = s_swapchain_descriptor.min_image_count,
         .imageFormat = s_swapchain_descriptor.color_format.format,
         .imageColorSpace = s_swapchain_descriptor.color_format.colorSpace,
@@ -625,12 +640,13 @@ b32 recreateSwapchain(void) {
         .presentMode = s_swapchain_descriptor.present_mode,
         .clipped = TRUE
     };
-    if(vkCreateSwapchainKHR(s_device, &swapchain_info, NULL, &s_swapchain) != VK_SUCCESS) {
-        INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
+    if(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_vulkan_context.swapchain) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
     }
 
-    vkGetSwapchainImagesKHR(s_device, s_swapchain, &s_swapchain_image_count, NULL);
-    vkGetSwapchainImagesKHR(s_device, s_swapchain, &s_swapchain_image_count, s_swapchain_images);
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, NULL); 
+    // @(Mitro): might cause issues if s_swapchain_image_count too big, but it shouldn't pass first sapchain creation in renderInit
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, s_swapchain_images);
     VkImageViewCreateInfo view_info = (VkImageViewCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = NULL, // set in for loop
@@ -648,8 +664,8 @@ b32 recreateSwapchain(void) {
     };
     for(u32 i = 0; i < s_swapchain_image_count; i++) {
         view_info.image = s_swapchain_images[i];
-        if(vkCreateImageView(s_device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
-            INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
+        if(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
+            _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
         }
     }
 //_sucess:
@@ -663,18 +679,11 @@ _fail:
 // =================================================================
 
 void getVulkanContext(VulkanContext* const context) {
-    *context = (VulkanContext) {
-        .window = s_window,
-        .instance = s_instance,
-        .surface = s_surface,
-        .device = s_device,
-        .callback = s_callback
-    };
+    *context = s_vulkan_context;
 }
 
 void getSwapchainContext(SwapchainContext* const context) {
     *context = (SwapchainContext) {
-        .swapchain = s_swapchain,
         .descriptor = &s_swapchain_descriptor,
         .images = s_swapchain_images,
         .views = s_swapchain_views,
@@ -682,19 +691,6 @@ void getSwapchainContext(SwapchainContext* const context) {
     };
 }
 
-void getDeviceContext(DeviceContext* const context) {
-    *context = (DeviceContext) {
-        .device = s_physical_device,
-        .features = &c_device_features,
-        .extensions = c_device_extensions,
-        .extension_count = c_device_extension_count
-    };
-}
-
-void getQueueContext(QueueContext* const context) {
-    *context = (QueueContext) {
-        .locators = s_queue_locators,
-        .queues = s_vulkan_queues,
-        .queue_count = c_queue_count
-    };
+void getExtContext(ExtContext* const context) {
+    *context = s_ext_context;
 }

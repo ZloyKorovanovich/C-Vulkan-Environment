@@ -3,7 +3,6 @@
 
 #include "../main.h"
 
-
 // ================================================ RENDER INTERFACE
 // =================================================================
 
@@ -25,7 +24,9 @@ typedef enum {
     VK_ERR_NO_SUITABLE_GPU,
     VK_ERR_DEVICE_CREATE,
     VK_ERR_SWAPCHAIN_CREATE,
+    VK_ERR_SWAPCHAIN_TOO_MANY_IMAGES,
     VK_ERR_SWAPCHAIN_VIEW_CREATE,
+
 
     VK_ERR_COMMAND_POOL_CREATE
 } VulkanCodes;
@@ -36,7 +37,6 @@ typedef enum {
     VULKAN_FLAG_FULLSCREEN = 0b0010,
     VULKAN_FLAG_RESIZABLE = 0b0100,
 } VulkanFlags;
-
 
 #ifdef INCLUDE_VULKAN_INTERNALS
 
@@ -63,6 +63,8 @@ typedef enum {
     VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME     \
 }
 
+#define DEVICE_FEATURES (VkPhysicalDeviceFeatures){0}
+
 #define SWAPCHAIN_MAX_IMAGE_COUNT 2
 
 
@@ -70,12 +72,12 @@ typedef enum {
 // =================================================================
 
 #define VULKAN_VK_ERR(code) CODE_PACK_CODE(CODE_PACK_MODULE(CODE_MASK_EMPTY, CODE_MODULE_VULKAN), code)
-#define INVOKE_CALLBACK(code) if(s_callback(VULKAN_VK_ERR(code))) goto _fail;
+#define INVOKE_CALLBACK(callback, code) if(callback(VULKAN_VK_ERR(code))) goto _fail;
 
 typedef struct {
     u32 family_id;
     u32 local_id;
-} Queue;
+} QueueLocator;
 
 typedef struct {
     VkExtent2D extent;
@@ -96,34 +98,36 @@ typedef struct {
     VkInstance instance;
     VkSurfaceKHR surface;
     VkDevice device;
-    EventCallback callback;
+    VkSwapchainKHR swapchain;
+    VkPhysicalDevice physical_device;
+    QueueLocator* queue_locators;
+    VkQueue* queues;
 } VulkanContext;
 
 typedef struct {
-    VkSwapchainKHR swapchain;
-    const SwapchainDscr* descriptor;
-    const VkImage* images;
-    const VkImageView* views;
+    SwapchainDscr* descriptor;
+    VkImage* images;
+    VkImageView* views;
     u32 image_count;
 } SwapchainContext;
 
-typedef struct {
-    VkPhysicalDevice device;
-    const VkPhysicalDeviceFeatures* features;
-    const char* const* extensions;
-    u32 extension_count;
-} DeviceContext;
 
 typedef struct {
-    const Queue* locators;
-    const VkQueue* queues;
-    u32 queue_count;
-} QueueContext;
+    // shader objects ext
+    PFN_vkCreateShadersEXT create_shaders;
+    PFN_vkDestroyShaderEXT destroy_shader;
+    PFN_vkCmdBindShadersEXT cmd_bind_shaders;
+    PFN_vkCmdSetCullModeEXT cmd_set_cull_mode;
+    PFN_vkCmdSetDepthWriteEnableEXT cmd_set_depth_write_enable;
+
+    // dynamic rendering khr
+    PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
+    PFN_vkCmdEndRenderingKHR cmd_end_rendering;
+} ExtContext;
 
 void getVulkanContext(VulkanContext* const context);
 void getSwapchainContext(SwapchainContext* const context);
-void getDeviceContext(DeviceContext* const context);
-void getQueueContext(QueueContext* const context);
+void getExtContext(ExtContext* const context);
 
 b32 recreateSwapchain(void);
 

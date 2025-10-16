@@ -113,7 +113,6 @@ static const char* module_names[] = {
 
 #define MIN_STACK 16
 #define ZE_ALLOCA(bytes) _alloca((MIN_STACK > bytes) ? MIN_STACK : bytes)
-#define Z_FREE(ptr) free(ptr); ptr = NULL; // zero memory after free()
 
 #define SET_MEMORY(ptr, value, count, i)                \
 for(u32 i = 0; i < count; i++) {                        \
