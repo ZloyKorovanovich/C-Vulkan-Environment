@@ -98,7 +98,6 @@ const char* c_device_extensions[] = DEVICE_EXTENSIONS;
 
 const VkPhysicalDeviceFeatures c_device_features = DEVICE_FEATURES;
 
-static EventCallback s_callback;
 
 static VkDebugUtilsMessengerEXT s_debug_messenger = NULL; // active only if initialized with debug flag
 static PFN_vkCreateDebugUtilsMessengerEXT ext_create_debug_messenger = NULL;
@@ -112,12 +111,14 @@ static u32 s_swapchain_image_count = SWAPCHAIN_MAX_IMAGE_COUNT;
 static VkImage s_swapchain_images[SWAPCHAIN_MAX_IMAGE_COUNT] = {0};
 static VkImageView s_swapchain_views[SWAPCHAIN_MAX_IMAGE_COUNT] = {0};
 
+static EventCallback s_callback;
 
 static VulkanContext s_vulkan_context = (VulkanContext) {
     .queue_locators = s_queue_locators,
     .queues = s_vulkan_queues
 };
 static ExtContext s_ext_context = (ExtContext){0};
+
 
 b32 defaultCallback(u32 code) {
     return 1;

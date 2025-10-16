@@ -74,27 +74,35 @@
 
 // PIPELINES
 
+static VkShaderEXT s_triangle_v;
+static VkShaderEXT s_triangle_f;
+
+b32 compileTriangleShaders() {
+
+}
+
 
 
 // ================================================ RENDER INTERFACE
 // =================================================================
 
+#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(event_callback, code)
 
 b32 renderRun(UpdateCallback update_callback, EventCallback event_callback) {
     b32 result;
     VulkanContext vulkan_context;
     getVulkanContext(&vulkan_context);
     
-    u32 command_pool_count = queue_context.queue_count;
-    VkCommandPool* command_pools = alloca(sizeof(VkCommandPool) * queue_context.queue_count);
+    u32 command_pool_count = DEVICE_QUEUE_COUNT;
+    VkCommandPool* command_pools = alloca(sizeof(VkCommandPool) * DEVICE_QUEUE_COUNT);
 
     VkCommandPoolCreateInfo pool_info = (VkCommandPoolCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO 
     };
     for(u32 i = 0; i < DEVICE_QUEUE_COUNT; i++) {
-        pool_info.queueFamilyIndex = queue_context.locators[i].family_id;
+        pool_info.queueFamilyIndex = vulkan_context.queue_locators[i].family_id;
         if(vkCreateCommandPool(vulkan_context.device, &pool_info, NULL, command_pools + i) != VK_SUCCESS) {
-            INVOKE_CALLBACK(VK_ERR_COMMAND_POOL_CREATE)
+            _INVOKE_CALLBACK(VK_ERR_COMMAND_POOL_CREATE)
         }
     }
 
