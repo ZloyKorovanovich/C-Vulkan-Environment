@@ -86,6 +86,8 @@ typedef b32 (*EventCallback) (u32 event_code);
 #define CODE_PACK_RESERVED(mask, code) (mask | (code << CODE_SHIFT_RESERVED))
 #define CODE_PACK_CODE(mask, code) (mask | code)
 
+#define DEBUG_TRACE printf("*** TRACE %s:%u %s\n", __FILE__, __LINE__, __func__);
+
 // ========================================================= ATTRIBS
 // =================================================================
 
@@ -101,12 +103,7 @@ typedef enum {
 } ModuleCodes;
 
 // names id should match ModuleCodes value
-static const char* module_names[] = {
-    "MAIN",
-    "VULKAN"
-};
-
-#define MODULE_NAME(id) module_names[id];
+#define MODULE_NAMES {"MAIN", "VULKAN"}
 
 // ====================================================== ALLOCATION
 // ================================================================= 

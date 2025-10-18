@@ -497,9 +497,14 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     }
 
     // device creation
+    VkPhysicalDeviceShaderObjectFeaturesEXT shader_object_feature = (VkPhysicalDeviceShaderObjectFeaturesEXT) {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
+        .shaderObject = TRUE
+    };
     VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering_feature = (VkPhysicalDeviceDynamicRenderingFeaturesKHR) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
-        .dynamicRendering = VK_TRUE
+        .dynamicRendering = VK_TRUE,
+        .pNext = &shader_object_feature
     };
     VkDeviceCreateInfo device_create_info = (VkDeviceCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -694,4 +699,8 @@ void getSwapchainContext(SwapchainContext* const context) {
 
 void getExtContext(ExtContext* const context) {
     *context = s_ext_context;
+}
+
+EventCallback getCallbackPfn(void) {
+    return s_callback;
 }

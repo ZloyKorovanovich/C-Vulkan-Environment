@@ -7,7 +7,7 @@
 // =================================================================
 
 b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback);
-b32 renderRun(UpdateCallback update_callback);
+b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path);
 void renderTerminate(void);
 
 typedef enum {
@@ -28,7 +28,10 @@ typedef enum {
     VK_ERR_SWAPCHAIN_VIEW_CREATE,
 
 
-    VK_ERR_COMMAND_POOL_CREATE
+    VK_ERR_COMMAND_POOL_CREATE,
+    VK_ERR_DESCRIPTOR_SET_LAYOUT_CREATE,
+    VK_ERR_SHADER_BUFFER_LOAD,
+    VK_ERR_SHADER_OBJECT_CREATE
 } VulkanCodes;
 
 
@@ -128,6 +131,7 @@ typedef struct {
 void getVulkanContext(VulkanContext* const context);
 void getSwapchainContext(SwapchainContext* const context);
 void getExtContext(ExtContext* const context);
+EventCallback getCallbackPfn(void);
 
 b32 recreateSwapchain(void);
 

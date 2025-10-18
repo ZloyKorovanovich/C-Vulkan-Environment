@@ -1,6 +1,7 @@
 
 #define INCLUDE_VULKAN_INTERNALS
 #include "vulkan.h"
+#include "shaders.h"
 
 /*                                                                                                                        
                              ###.                                                                                               
@@ -69,33 +70,40 @@
                                                             REBECCA
 */
 
+#define SHADER_COUNT 2
+
+#define SHADER_TRIANGLE_V_ID 0
+#define SHADER_TRIANGLE_F_ID 1
+
+const u32 c_shader_count = SHADER_COUNT;
+static VkShaderEXT s_shaders[SHADER_COUNT] = {0};
+
 // =================================================== RENDER PASSES
 // =================================================================
 
-// PIPELINES
-
-static VkShaderEXT s_triangle_v;
-static VkShaderEXT s_triangle_f;
-
-b32 compileTriangleShaders() {
-
+b32 readShaderFile(const char* path, u32 buffer_size, void* const buffer) {
+    FILE* file = fopen(path, "rb");
+    if(!file) return FALSE;
+    fread(buffer, sizeof(u32), buffer_size / sizeof(u32), file);
+    fclose(file);
+    return TRUE;
 }
-
-
 
 // ================================================ RENDER INTERFACE
 // =================================================================
 
 #define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(event_callback, code)
 
-b32 renderRun(UpdateCallback update_callback, EventCallback event_callback) {
-    b32 result;
+b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path) {
+    event_callback = event_callback ? event_callback : getCallbackPfn();
     VulkanContext vulkan_context;
+    ExtContext ext_context;
     getVulkanContext(&vulkan_context);
+    getExtContext(&ext_context);
     
+    // create command pools
     u32 command_pool_count = DEVICE_QUEUE_COUNT;
     VkCommandPool* command_pools = alloca(sizeof(VkCommandPool) * DEVICE_QUEUE_COUNT);
-
     VkCommandPoolCreateInfo pool_info = (VkCommandPoolCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO 
     };
@@ -106,19 +114,76 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback) {
         }
     }
 
-    //... RENDER PASS CREATION
+    // create layouts
+    VkDescriptorSetLayout set_layout;
+    VkDescriptorSetLayoutCreateInfo layout_set_info = (VkDescriptorSetLayoutCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pBindings = NULL,
+        .bindingCount = 0
+    };
+    if(vkCreateDescriptorSetLayout(vulkan_context.device, &layout_set_info, NULL, &set_layout) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_DESCRIPTOR_SET_LAYOUT_CREATE)
+    }
+
+    // read shaders and create shader objects
+    void* shader_buffer = malloc(SHADER_BUFFER_SIZE);
+    if(!readShaderFile(shader_path, SHADER_BUFFER_SIZE, shader_buffer)) {
+        _INVOKE_CALLBACK(VK_ERR_SHADER_BUFFER_LOAD)
+    }
+    VkShaderCreateInfoEXT shader_create_infos[SHADER_COUNT] = {
+        (VkShaderCreateInfoEXT) {
+            .sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .nextStage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pName = SHADER_ENTRY_VERTEX,
+            .flags = 0,
+            .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+            .pCode = (char*)shader_buffer + SHADER_LOC_TRIANGLE_V,
+            .codeSize = SHADER_SIZE_TRIANGLE_V,
+            .setLayoutCount = 1,
+            .pSetLayouts = &set_layout,
+            .pushConstantRangeCount = 0
+        },
+        (VkShaderCreateInfoEXT) {
+            .sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .nextStage = 0,
+            .pName = SHADER_ENTRY_FRAGMENT,
+            .flags = 0,
+            .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+            .pCode = (char*)shader_buffer + SHADER_LOC_TRIANGLE_F,
+            .codeSize = SHADER_SIZE_TRIANGLE_F,
+            .setLayoutCount = 1,
+            .pSetLayouts = &set_layout,
+            .pushConstantRangeCount = 0
+        }
+    };
+    if(ext_context.create_shaders(vulkan_context.device, SHADER_COUNT, shader_create_infos, NULL, s_shaders) != VK_SUCCESS) {
+
+        _INVOKE_CALLBACK(VK_ERR_SHADER_OBJECT_CREATE)
+    }
+    SAFE_DESTROY(shader_buffer, free(shader_buffer))
+
+    // render loop
     while(!glfwWindowShouldClose(vulkan_context.window)) {
         glfwPollEvents();
         
     }
-    //... RENDER PASS DESTRUCTION
 
 //_sucess:
-    result = TRUE;
-    goto _end;
+    for(u32 i = 0; i < c_shader_count; i++) {
+        SAFE_DESTROY(s_shaders[i], ext_context.destroy_shader(vulkan_context.device, s_shaders[i], NULL))
+    }
+    SAFE_DESTROY(set_layout, vkDestroyDescriptorSetLayout(vulkan_context.device, set_layout, NULL))
+    for(u32 i = 0; i < command_pool_count; i++) {
+        SAFE_DESTROY(command_pools[i], vkDestroyCommandPool(vulkan_context.device, command_pools[i], NULL))
+    }
+    return TRUE;
 _fail:
-    result = FALSE;
-_end:
+    for(u32 i = 0; i < c_shader_count; i++) {
+        SAFE_DESTROY(s_shaders[i], ext_context.destroy_shader(vulkan_context.device, s_shaders[i], NULL))
+    }
+    SAFE_DESTROY(set_layout, vkDestroyDescriptorSetLayout(vulkan_context.device, set_layout, NULL))
     for(u32 i = 0; i < command_pool_count; i++) {
         SAFE_DESTROY(command_pools[i], vkDestroyCommandPool(vulkan_context.device, command_pools[i], NULL))
     }
