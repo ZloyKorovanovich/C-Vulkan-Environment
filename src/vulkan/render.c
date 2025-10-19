@@ -92,6 +92,14 @@ b32 readShaderFile(const char* path, u32 buffer_size, void* const buffer) {
 // ================================================ RENDER INTERFACE
 // =================================================================
 
+
+b32 renderLoop(VulkanContext* vk_context, ExtContext* ext_context) {
+    // render loop
+    while(!glfwWindowShouldClose(vk_context->window)) {
+        glfwPollEvents();
+    }
+}
+
 #define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(event_callback, code)
 
 b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path) {
@@ -130,44 +138,28 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     if(!readShaderFile(shader_path, SHADER_BUFFER_SIZE, shader_buffer)) {
         _INVOKE_CALLBACK(VK_ERR_SHADER_BUFFER_LOAD)
     }
-    VkShaderCreateInfoEXT shader_create_infos[SHADER_COUNT] = {
-        (VkShaderCreateInfoEXT) {
-            .sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .nextStage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pName = SHADER_ENTRY_VERTEX,
-            .flags = 0,
-            .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
-            .pCode = (char*)shader_buffer + SHADER_LOC_TRIANGLE_V,
-            .codeSize = SHADER_SIZE_TRIANGLE_V,
-            .setLayoutCount = 1,
-            .pSetLayouts = &set_layout,
-            .pushConstantRangeCount = 0
-        },
-        (VkShaderCreateInfoEXT) {
-            .sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .nextStage = 0,
-            .pName = SHADER_ENTRY_FRAGMENT,
-            .flags = 0,
-            .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
-            .pCode = (char*)shader_buffer + SHADER_LOC_TRIANGLE_F,
-            .codeSize = SHADER_SIZE_TRIANGLE_F,
-            .setLayoutCount = 1,
-            .pSetLayouts = &set_layout,
-            .pushConstantRangeCount = 0
-        }
-    };
-    if(ext_context.create_shaders(vulkan_context.device, SHADER_COUNT, shader_create_infos, NULL, s_shaders) != VK_SUCCESS) {
 
+    
+
+    if(ext_context.create_shaders(vulkan_context.device, SHADER_COUNT, shader_create_infos, NULL, s_shaders) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SHADER_OBJECT_CREATE)
     }
-    SAFE_DESTROY(shader_buffer, free(shader_buffer))
 
-    // render loop
-    while(!glfwWindowShouldClose(vulkan_context.window)) {
-        glfwPollEvents();
-        
+    free(shader_buffer)
+
+    VkCommandBuffer command_buffer;
+    VkCommandBufferAllocateInfo cmbuffers_info = (VkCommandBufferAllocateInfo) {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandBufferCount = 1,
+        .commandPool = command_pools[0],
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+    };
+    if(vkAllocateCommandBuffers(vulkan_context.device, &cmbuffers_info, &command_buffer) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_ALLOCATE_COMMAND_BUFFER)
+    }
+
+    if(!renderLoop) {
+        _INVOKE_CALLBACK(VK_ERR_RENDER_LOOP_FAIL)
     }
 
 //_sucess:

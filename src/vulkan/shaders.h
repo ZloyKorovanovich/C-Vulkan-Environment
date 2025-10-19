@@ -4,14 +4,38 @@
 #ifndef _SHADERS_INCLUDED
 #define _SHADERS_INCLUDED
 
+typedef struct {
+	const char* entry;
+	u64 code_offset;
+	u64 code_size;
+	u32 stage;
+	u32 next_stage;
+} ShaderInfo;
+
 #define SHADER_ENTRY_VERTEX "vertexFunc"
 #define SHADER_ENTRY_FRAGMENT "fragmentFunc"
+#define SHADER_ENTRY_COMPUTE "computeFunc"
 
-#define SHADER_LOC_TRIANGLE_F 0LU
-#define SHADER_SIZE_TRIANGLE_F 336LU
-#define SHADER_LOC_TRIANGLE_V 336LU
-#define SHADER_SIZE_TRIANGLE_V 728LU
+const ShaderInfo c_shader_infos[] = {
+	(ShaderInfo) {
+		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.next_stage = 0,
+		.entry = SHADER_ENTRY_FRAGMENT,
+		.code_offset = 0,
+		.code_size = 336,
+	},
+	(ShaderInfo) {
+		.stage = VK_SHADER_STAGE_VERTEX_BIT,
+		.next_stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.entry = SHADER_ENTRY_VERTEX,
+		.code_offset = 336,
+		.code_size = 728,
+	},
+};
 
+#define SHADER_ID_TRIANGLE_F 0
+#define SHADER_ID_TRIANGLE_V 1
+#define SHADER_COUNT 2
 #define SHADER_BUFFER_SIZE 1064LU
 
 #endif
