@@ -92,6 +92,11 @@ typedef b32 (*EventCallback) (u32 event_code);
 // =================================================================
 
 #define ATTRIB_PACKED __attribute__((__packed__))
+#define EXPECT(exp, val) __builtin_expect(exp, val)
+#define EXPECT_T(exp) EXPECT(exp, 1)
+#define EXPECT_F(exp) EXPECT(exp, 0)
+
+#define ERROR_CATCH(exp) if(EXPECT_F(exp))
 
 // ========================================================= MODULES
 // =================================================================

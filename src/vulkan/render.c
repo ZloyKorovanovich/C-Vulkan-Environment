@@ -70,11 +70,6 @@
                                                             REBECCA
 */
 
-#define SHADER_COUNT 2
-
-#define SHADER_TRIANGLE_V_ID 0
-#define SHADER_TRIANGLE_F_ID 1
-
 const u32 c_shader_count = SHADER_COUNT;
 static VkShaderEXT s_shaders[SHADER_COUNT] = {0};
 
@@ -98,6 +93,7 @@ b32 renderLoop(VulkanContext* vk_context, ExtContext* ext_context) {
     while(!glfwWindowShouldClose(vk_context->window)) {
         glfwPollEvents();
     }
+    return TRUE;
 }
 
 #define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(event_callback, code)
@@ -134,18 +130,29 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     }
 
     // read shaders and create shader objects
-    void* shader_buffer = malloc(SHADER_BUFFER_SIZE);
+    void* shader_compilation_memory = malloc(sizeof(VkShaderCreateInfoEXT) * SHADER_COUNT + SHADER_BUFFER_SIZE);
+    void* shader_buffer = (char*)shader_compilation_memory + sizeof(VkShaderCreateInfoEXT) * SHADER_COUNT;
+    VkShaderCreateInfoEXT* shader_create_infos = shader_compilation_memory;
+
     if(!readShaderFile(shader_path, SHADER_BUFFER_SIZE, shader_buffer)) {
         _INVOKE_CALLBACK(VK_ERR_SHADER_BUFFER_LOAD)
     }
-
-    
-
+    for(u32 i = 0; i < SHADER_COUNT; i++) {
+        shader_create_infos[i] = (VkShaderCreateInfoEXT) {
+            .sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+            .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+            .flags = 0,
+            .stage = c_shader_infos[i].stage,
+            .nextStage = c_shader_infos[i].next_stage,
+            .pName = c_shader_infos[i].entry,
+            .pCode = (char*)shader_buffer + c_shader_infos[i].code_offset,
+            .codeSize = c_shader_infos[i].code_size
+        };
+    }
     if(ext_context.create_shaders(vulkan_context.device, SHADER_COUNT, shader_create_infos, NULL, s_shaders) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SHADER_OBJECT_CREATE)
     }
-
-    free(shader_buffer)
+    free(shader_compilation_memory);
 
     VkCommandBuffer command_buffer;
     VkCommandBufferAllocateInfo cmbuffers_info = (VkCommandBufferAllocateInfo) {
@@ -157,8 +164,7 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     if(vkAllocateCommandBuffers(vulkan_context.device, &cmbuffers_info, &command_buffer) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_ALLOCATE_COMMAND_BUFFER)
     }
-
-    if(!renderLoop) {
+    if(!renderLoop(&vulkan_context, &ext_context)) {
         _INVOKE_CALLBACK(VK_ERR_RENDER_LOOP_FAIL)
     }
 
