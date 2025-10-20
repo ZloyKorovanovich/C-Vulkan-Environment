@@ -207,7 +207,7 @@ b32 layoutDeviceQueues(VkPhysicalDevice device, u32 queue_count, const u32* queu
     for(u32 i = 0; i < queue_count; i++) {
         u32 flags = queue_flags[i];
         for(u32 j = 0; j < queue_family_count; j++) {
-            if(flags == (queue_families[i].queueFlags & DEVICE_QUEUE_FLAG_MASK) && queue_families[i].queueCount > occupied_queues[j]) {
+            if(flags == (queue_families[j].queueFlags & DEVICE_QUEUE_FLAG_MASK) && queue_families[j].queueCount > occupied_queues[j]) {
                 found_queues++;
                 if(queue_ids) {
                     queue_ids[i] = (QueueLocator) {
@@ -351,7 +351,7 @@ void getScreenDescriptor(GLFWwindow* window, VkSurfaceKHR surface, VkPhysicalDev
 // ================================================ RENDER INTERFACE
 // =================================================================
 
-#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code)
+#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code, _fail)
 #define _LOAD_EXT_FUNC(pfn, name)                                               \
 pfn = (void*)vkGetInstanceProcAddr(s_vulkan_context.instance, #name);           \
 if(!pfn) {                                                                      \
@@ -363,11 +363,11 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     s_callback = callback ? callback : &defaultCallback;
 
     // creating window
-    if(!glfwInit()) {
+    ERROR_CATCH(!glfwInit()) {
         _INVOKE_CALLBACK(VK_ERR_GLFW_INIT)
     }
     s_vulkan_context.window = createWindow(width, height, flags, "vulkan_window");
-    if(!s_vulkan_context.window) {
+    ERROR_CATCH(!s_vulkan_context.window) {
         _INVOKE_CALLBACK(VK_ERR_WINDOW_CREATE)
     }
 
@@ -394,10 +394,10 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     if(FLAG_IN_MASK(flags, VULKAN_FLAG_DEBUG)) {        
         u32 debug_extension_count = glfw_extension_count + c_vulkan_extension_count_debug; 
 
-        if(!checkVulkanLayerSupport(c_vulkan_layer_count, c_vulkan_layers)) {
+        ERROR_CATCH(!checkVulkanLayerSupport(c_vulkan_layer_count, c_vulkan_layers)) {
             _INVOKE_CALLBACK(VK_ERR_DEBUG_LAYERS_NOT_PRESENT)
         }
-        if(!checkVulkanExtensionsSupport(debug_extension_count, instance_extensions)) {
+        ERROR_CATCH(!checkVulkanExtensionsSupport(debug_extension_count, instance_extensions)) {
             _INVOKE_CALLBACK(VK_ERR_EXT_NOT_PRESENT)
         }
         VkDebugUtilsMessengerCreateInfoEXT debug_info = (VkDebugUtilsMessengerCreateInfoEXT) {
@@ -416,19 +416,19 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
             .ppEnabledLayerNames = c_vulkan_layers,
             .pNext = &debug_info
         };
-        if(vkCreateInstance(&instance_info, NULL, &s_vulkan_context.instance) != VK_SUCCESS) {
+        ERROR_CATCH(vkCreateInstance(&instance_info, NULL, &s_vulkan_context.instance) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_INSTANCE_CREATE)
         }
 
         _LOAD_EXT_FUNC(ext_create_debug_messenger, vkCreateDebugUtilsMessengerEXT)
         _LOAD_EXT_FUNC(ext_destroy_debug_messenger, vkDestroyDebugUtilsMessengerEXT)
 
-        if(ext_create_debug_messenger(s_vulkan_context.instance, &debug_info, NULL, &s_debug_messenger) != VK_SUCCESS) {
+        ERROR_CATCH(ext_create_debug_messenger(s_vulkan_context.instance, &debug_info, NULL, &s_debug_messenger) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_DEBUG_MESSENGER_CREATE)
         }
     } else {
         u32 extension_count = glfw_extension_count + c_vulkan_extension_count;
-        if(!checkVulkanExtensionsSupport(extension_count, instance_extensions)) {
+        ERROR_CATCH(!checkVulkanExtensionsSupport(extension_count, instance_extensions)) {
             _INVOKE_CALLBACK(VK_ERR_EXT_NOT_PRESENT)
         }
         VkInstanceCreateInfo instance_info = (VkInstanceCreateInfo) {
@@ -441,19 +441,19 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
             .ppEnabledLayerNames = NULL,
             .pNext = NULL
         };
-        if(vkCreateInstance(&instance_info, NULL, &s_vulkan_context.instance) != VK_SUCCESS) {
+        ERROR_CATCH(vkCreateInstance(&instance_info, NULL, &s_vulkan_context.instance) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_INSTANCE_CREATE)
         }
     }
 
-    if(glfwCreateWindowSurface(s_vulkan_context.instance, s_vulkan_context.window, NULL, &s_vulkan_context.surface) != VK_SUCCESS) {
+    ERROR_CATCH(glfwCreateWindowSurface(s_vulkan_context.instance, s_vulkan_context.window, NULL, &s_vulkan_context.surface) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SURFACE_CREATE)
     }
 
     // device selection
     u32 vk_device_count;
     vkEnumeratePhysicalDevices(s_vulkan_context.instance, &vk_device_count, NULL);
-    if(vk_device_count == 0) {
+    ERROR_CATCH(vk_device_count == 0) {
         _INVOKE_CALLBACK(VK_ERR_NO_GPU)
     }
     VkPhysicalDevice* vk_devices = alloca(sizeof(VkPhysicalDevice) * vk_device_count);
@@ -473,12 +473,15 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
             best_score = score;
         }
     }
-    if(!s_vulkan_context.physical_device) {
+    ERROR_CATCH(!s_vulkan_context.physical_device) {
         _INVOKE_CALLBACK(VK_ERR_NO_SUITABLE_GPU)
     }
 
     // queue layout for device create info
     layoutDeviceQueues(s_vulkan_context.physical_device, c_queue_count, c_queue_flags, s_queue_locators);
+        for(u32 i = 0; i < DEVICE_QUEUE_COUNT; i++) { // HERE
+        printf("%u %u\n", s_queue_locators[i].family_id, s_queue_locators[i].local_id);
+    }
     u32 queue_family_count = 0;
     QueueLocator* queue_families = alloca(sizeof(QueueLocator) * c_queue_count);
     combineQueuesToFamilies(c_queue_count, s_queue_locators, &queue_family_count, queue_families);
@@ -515,7 +518,7 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         .pEnabledFeatures = &c_device_features,
         .pNext = &dynamic_rendering_feature
     };
-    if(vkCreateDevice(s_vulkan_context.physical_device, &device_create_info, NULL, &s_vulkan_context.device) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateDevice(s_vulkan_context.physical_device, &device_create_info, NULL, &s_vulkan_context.device) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_DEVICE_CREATE)
     }
     for(u32 i = 0; i < c_queue_count; i++) {
@@ -550,12 +553,12 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         .presentMode = s_swapchain_descriptor.present_mode,
         .clipped = TRUE
     };
-    if(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_vulkan_context.swapchain) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_vulkan_context.swapchain) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
     }
 
     vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, NULL);
-    if(s_swapchain_image_count > SWAPCHAIN_MAX_IMAGE_COUNT) {
+    ERROR_CATCH(s_swapchain_image_count > SWAPCHAIN_MAX_IMAGE_COUNT) {
         _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_TOO_MANY_IMAGES)
     }
     vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, s_swapchain_images);
@@ -576,7 +579,7 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     };
     for(u32 i = 0; i < s_swapchain_image_count; i++) {
         view_info.image = s_swapchain_images[i];
-        if(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
+        ERROR_CATCH(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
         }
     }
@@ -613,6 +616,7 @@ void renderTerminate(void) {
 
 // this function should be called when window is resized
 b32 recreateSwapchain(void) {
+    vkDeviceWaitIdle(s_vulkan_context.device);
     for(u32 i = 0; i < s_swapchain_image_count; i++) {
         SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_views[i], NULL))
     }

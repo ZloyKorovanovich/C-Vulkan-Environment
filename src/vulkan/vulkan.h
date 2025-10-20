@@ -30,10 +30,16 @@ typedef enum {
 
     VK_ERR_COMMAND_POOL_CREATE,
     VK_ERR_DESCRIPTOR_SET_LAYOUT_CREATE,
+    VK_ERR_SHADER_BUFFER_ALLOCATE,
     VK_ERR_SHADER_BUFFER_LOAD,
+    VK_ERR_SHADER_OBJECT_ARRAY_ALLOCATE,
     VK_ERR_SHADER_OBJECT_CREATE,
-    VK_ERR_ALLOCATE_COMMAND_BUFFER,
-    VK_ERR_RENDER_LOOP_FAIL
+    VK_ERR_COMMAND_BUFFER_ALLOCATE,
+    VK_ERR_RENDER_LOOP_FAIL,
+
+    VK_ERR_SEAMAPHORE_CREATE,
+    VK_ERR_FENCE_CREATE,
+    VK_ERR_QUEUE_SUBMIT
 } VulkanCodes;
 
 
@@ -77,7 +83,7 @@ typedef enum {
 // =================================================================
 
 #define VULKAN_VK_ERR(code) CODE_PACK_CODE(CODE_PACK_MODULE(CODE_MASK_EMPTY, CODE_MODULE_VULKAN), code)
-#define INVOKE_CALLBACK(callback, code) if(callback(VULKAN_VK_ERR(code))) goto _fail;
+#define INVOKE_CALLBACK(callback, code, label) if(callback(VULKAN_VK_ERR(code))) goto label;
 
 typedef struct {
     u32 family_id;
