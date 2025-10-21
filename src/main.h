@@ -30,10 +30,12 @@ typedef int b32;
 #define I64_MAX 9223372036854775807
 #define I32_MAX 2147483647
 #define U32_MAX 0xffffffff
+#define U64_MAX 0xffffffffffffffff
 
 #define I64_MIN (-9223372036854775807 - 1)
 #define I32_MIN (-2147483647 - 1)
 #define U32_MIN 0
+#define U64_MIN 0
 
 typedef u32 Handle;
 #define HANDLE_INVALID 0xffffffff

@@ -29,15 +29,18 @@ typedef enum {
 
 
     VK_ERR_COMMAND_POOL_CREATE,
+    VK_ERR_DESCRIPTOR_POOL_CREATE,
     VK_ERR_DESCRIPTOR_SET_LAYOUT_CREATE,
+    VK_ERR_PIPELINE_LAYOUT_CREATE,
     VK_ERR_SHADER_BUFFER_ALLOCATE,
     VK_ERR_SHADER_BUFFER_LOAD,
     VK_ERR_SHADER_OBJECT_ARRAY_ALLOCATE,
     VK_ERR_SHADER_OBJECT_CREATE,
-    VK_ERR_COMMAND_BUFFER_ALLOCATE,
     VK_ERR_RENDER_LOOP_FAIL,
 
-    VK_ERR_SEAMAPHORE_CREATE,
+    VK_ERR_COMMAND_BUFFER_ALLOCATE,
+    VK_ERR_DESCRIPTOR_SET_ALLOCATE,
+    VK_ERR_SEMAPHORE_CREATE,
     VK_ERR_FENCE_CREATE,
     VK_ERR_QUEUE_SUBMIT
 } VulkanCodes;
@@ -130,6 +133,21 @@ typedef struct {
     PFN_vkCmdBindShadersEXT cmd_bind_shaders;
     PFN_vkCmdSetCullModeEXT cmd_set_cull_mode;
     PFN_vkCmdSetDepthWriteEnableEXT cmd_set_depth_write_enable;
+    PFN_vkCmdSetVertexInputEXT cmd_set_vertex_input;
+
+    PFN_vkCmdSetRasterizationSamplesEXT cmd_set_rasterization_samples;
+    PFN_vkCmdSetSampleMaskEXT cmd_set_sample_mask;
+    PFN_vkCmdSetAlphaToCoverageEnableEXT cmd_set_alpha_to_coverage_enable;
+    PFN_vkCmdSetAlphaToOneEnableEXT cmd_set_alpha_to_one;
+    PFN_vkCmdSetPolygonModeEXT cmd_set_polygon_mode;
+    PFN_vkCmdSetDepthClampEnableEXT cmd_set_depth_clamp_enable;
+
+    PFN_vkCmdSetLogicOpEnableEXT cmd_set_logic_op_enable;
+    PFN_vkCmdSetLogicOpEXT cmd_set_logic_op;
+    PFN_vkCmdSetColorBlendEnableEXT cmd_set_color_blend_enable;
+    PFN_vkCmdSetColorWriteMaskEXT cmd_set_color_write_mask;
+    PFN_vkCmdSetColorBlendEquationEXT cmd_set_color_blend_equation;
+    PFN_vkCmdSetColorBlendAdvancedEXT cmd_set_color_blend_advanced;
 
     // dynamic rendering khr
     PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;

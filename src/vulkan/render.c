@@ -75,10 +75,15 @@ static VkCommandPool s_command_pools[DEVICE_QUEUE_COUNT] = {0};
 
 static u32 s_shader_count = 0;
 static VkShaderEXT* s_shaders = NULL;
+static u32* s_shader_stages = NULL;
 
 static EventCallback s_event_callback = NULL;
 static VulkanContext s_vulkan_context = (VulkanContext){0};
 static ExtContext s_ext_context = (ExtContext){0};
+
+static VkDescriptorPool s_descriptor_pool = NULL;
+static VkDescriptorSetLayout s_layout_set = NULL;
+static VkPipelineLayout s_layout = NULL;
 
 // =================================================== RENDER PASSES
 // =================================================================
@@ -111,6 +116,18 @@ b32 renderLoop(void) {
     ERROR_CATCH(vkAllocateCommandBuffers(s_vulkan_context.device, &cmbuffers_info, &command_buffer) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_COMMAND_BUFFER_ALLOCATE)
     }
+
+    VkDescriptorSet descriptor_set;
+    VkDescriptorSetAllocateInfo descriptor_set_info = (VkDescriptorSetAllocateInfo) {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = s_descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &s_layout_set
+    };
+    ERROR_CATCH(vkAllocateDescriptorSets(s_vulkan_context.device, &descriptor_set_info, &descriptor_set) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_DESCRIPTOR_SET_ALLOCATE)
+    }
+
     VkSemaphoreCreateInfo semaphore_info = (VkSemaphoreCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
     };
@@ -119,10 +136,10 @@ b32 renderLoop(void) {
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
     ERROR_CATCH(vkCreateSemaphore(s_vulkan_context.device, &semaphore_info, NULL, &s_image_available_semaphore) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_SEAMAPHORE_CREATE)
+        _INVOKE_CALLBACK(VK_ERR_SEMAPHORE_CREATE)
     };
     ERROR_CATCH(vkCreateSemaphore(s_vulkan_context.device, &semaphore_info, NULL, &s_image_finished_semaphore) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_SEAMAPHORE_CREATE)
+        _INVOKE_CALLBACK(VK_ERR_SEMAPHORE_CREATE)
     };
     ERROR_CATCH(vkCreateFence(s_vulkan_context.device, &fence_info, NULL, &s_in_flight_fence)) {
         _INVOKE_CALLBACK(VK_ERR_FENCE_CREATE)
@@ -153,13 +170,39 @@ b32 renderLoop(void) {
         .layerCount = 1,
         .renderArea = render_area
     };
+    VkImageMemoryBarrier image_memory_top_barrier = (VkImageMemoryBarrier) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        }
+    };
+    VkImageMemoryBarrier image_memory_bottom_barrier = (VkImageMemoryBarrier) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        }
+    };
     u32 image_id;
 
     // render loop
     while(!glfwWindowShouldClose(s_vulkan_context.window)) {
         glfwPollEvents();
-        vkWaitForFences(s_vulkan_context.device, 1, &s_in_flight_fence, VK_TRUE, U32_MAX);
-        VkResult image_acquire_result = vkAcquireNextImageKHR(s_vulkan_context.device, s_vulkan_context.swapchain, U32_MAX, s_image_available_semaphore, NULL, &image_id);
+        vkWaitForFences(s_vulkan_context.device, 1, &s_in_flight_fence, VK_TRUE, U64_MAX);
+        VkResult image_acquire_result = vkAcquireNextImageKHR(s_vulkan_context.device, s_vulkan_context.swapchain, U64_MAX, s_image_available_semaphore, NULL, &image_id);
         if(EXPECT_F(image_acquire_result == VK_ERROR_OUT_OF_DATE_KHR)) {
             recreateSwapchain();
             continue;
@@ -174,12 +217,62 @@ b32 renderLoop(void) {
         };
         vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);//@(Mitro): should chekc error if fails
 
+        image_memory_top_barrier.image = swapchain_context.images[image_id];
+        vkCmdPipelineBarrier(
+            command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
+            0, 0, NULL, 0, NULL, 1, &image_memory_top_barrier
+        );
+
         color_attachment.imageView = swapchain_context.views[image_id];
         s_ext_context.cmd_begin_rendering(command_buffer, &vk_rendeirng_info);
         
-        //... DRAW here
+        // DRAWING BEGIN
+        VkViewport viewport = (VkViewport) { 
+            .height = swapchain_context.descriptor->extent.height,
+            .width = swapchain_context.descriptor->extent.width,
+            .x = 0,
+            .y = 0,
+            .minDepth = 0,
+            .maxDepth = 1
+        };
+        vkCmdSetViewportWithCount(command_buffer, 1, &viewport);
+        vkCmdSetScissorWithCount(command_buffer, 1, &render_area);
+        vkCmdSetRasterizerDiscardEnable(command_buffer, FALSE);
+        
+        s_ext_context.cmd_set_vertex_input(command_buffer, 0, NULL,0, NULL);
+        vkCmdSetPrimitiveTopology(command_buffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        vkCmdSetPrimitiveRestartEnable(command_buffer, FALSE);
+
+        //only if rasterisation discard disabled
+        s_ext_context.cmd_set_rasterization_samples(command_buffer, VK_SAMPLE_COUNT_1_BIT);
+        s_ext_context.cmd_set_sample_mask(command_buffer, 0, NULL);
+        s_ext_context.cmd_set_alpha_to_coverage_enable(command_buffer, FALSE);
+        s_ext_context.cmd_set_polygon_mode(command_buffer, VK_POLYGON_MODE_FILL);
+        vkCmdSetLineWidth(command_buffer, 1.0f);
+        vkCmdSetCullMode(command_buffer, VK_CULL_MODE_NONE);
+        vkCmdSetFrontFace(command_buffer, VK_FRONT_FACE_CLOCKWISE);
+        vkCmdSetDepthTestEnable(command_buffer, FALSE);
+        vkCmdSetDepthBiasEnable(command_buffer, FALSE);
+        vkCmdSetStencilTestEnable(command_buffer, FALSE);
+
+        s_ext_context.cmd_set_color_blend_enable(command_buffer, 0, 1, (VkBool32[]){FALSE});
+        s_ext_context.cmd_set_color_write_mask(command_buffer, 0, 1, (u32[]){0});
+
+        // STOPPED HERE AND THATS NOT EVERYTHING
+        // check laggy website page https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#shaders-objects-state
+        // May be switch to old good pipelines?
+
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_layout, 0, 1, &descriptor_set, 0, NULL);
+        s_ext_context.cmd_bind_shaders(command_buffer, s_shader_count, s_shader_stages, s_shaders);
+        vkCmdDraw(command_buffer, 3, 1, 0, 0);
+        // DRAWING END
 
         s_ext_context.cmd_end_rendering(command_buffer);
+        image_memory_bottom_barrier.image = swapchain_context.images[image_id];
+        vkCmdPipelineBarrier(
+            command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
+            0, 0, NULL, 0, NULL, 1, &image_memory_bottom_barrier
+        );
 
         vkEndCommandBuffer(command_buffer);
         VkSubmitInfo submit_info = (VkSubmitInfo) {
@@ -199,7 +292,7 @@ b32 renderLoop(void) {
         VkPresentInfoKHR present_info = (VkPresentInfoKHR) {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &s_image_available_semaphore,
+            .pWaitSemaphores = &s_image_finished_semaphore,
             .swapchainCount = 1,
             .pSwapchains = &s_vulkan_context.swapchain,
             .pImageIndices = &image_id,
@@ -231,26 +324,42 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     getExtContext(&s_ext_context);
     
     // create command pools
-    VkCommandPoolCreateInfo pool_info = (VkCommandPoolCreateInfo) {
+    VkCommandPoolCreateInfo command_pool_info = (VkCommandPoolCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
     };
     for(u32 i = 0; i < c_command_pool_count; i++) {
-        pool_info.queueFamilyIndex = s_vulkan_context.queue_locators[i].family_id;
-        pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        ERROR_CATCH(vkCreateCommandPool(s_vulkan_context.device, &pool_info, NULL, s_command_pools + i) != VK_SUCCESS) {
+        command_pool_info.queueFamilyIndex = s_vulkan_context.queue_locators[i].family_id;
+        command_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        ERROR_CATCH(vkCreateCommandPool(s_vulkan_context.device, &command_pool_info, NULL, s_command_pools + i) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_COMMAND_POOL_CREATE)
         }
     }
 
+    // create descriptor pool
+    VkDescriptorPoolCreateInfo descriptor_pool_info = (VkDescriptorPoolCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1
+    };
+    ERROR_CATCH(vkCreateDescriptorPool(s_vulkan_context.device, &descriptor_pool_info, NULL, &s_descriptor_pool) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_DESCRIPTOR_POOL_CREATE)
+    }
+
     // create layouts
-    VkDescriptorSetLayout set_layout;
     VkDescriptorSetLayoutCreateInfo layout_set_info = (VkDescriptorSetLayoutCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pBindings = NULL,
         .bindingCount = 0
     };
-    ERROR_CATCH(vkCreateDescriptorSetLayout(s_vulkan_context.device, &layout_set_info, NULL, &set_layout) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateDescriptorSetLayout(s_vulkan_context.device, &layout_set_info, NULL, &s_layout_set) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_DESCRIPTOR_SET_LAYOUT_CREATE)
+    }
+    VkPipelineLayoutCreateInfo layout_info = (VkPipelineLayoutCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &s_layout_set
+    };
+    ERROR_CATCH(vkCreatePipelineLayout(s_vulkan_context.device, &layout_info, NULL, &s_layout) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_PIPELINE_LAYOUT_CREATE)
     }
 
     // read shaders and create shader objects
@@ -266,7 +375,8 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     }
 
     s_shader_count = SHADER_COUNT;
-    s_shaders = malloc(sizeof(VkShaderEXT) * SHADER_COUNT);
+    s_shaders = malloc(sizeof(VkShaderEXT) * SHADER_COUNT + sizeof(u32) * SHADER_COUNT);
+    s_shader_stages = (u32*)((char*)s_shaders + sizeof(VkShaderEXT) * SHADER_COUNT); //@(Mitro): A little bit tricky part here
     ERROR_CATCH(!shader_compilation_memory) {
         _INVOKE_CALLBACK(VK_ERR_SHADER_OBJECT_ARRAY_ALLOCATE);
     }
@@ -282,6 +392,7 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
             .pCode = (char*)shader_buffer + c_shader_infos[i].code_offset,
             .codeSize = c_shader_infos[i].code_size
         };
+        s_shader_stages[i] = c_shader_infos[i].stage;
     }
     ERROR_CATCH(s_ext_context.create_shaders(s_vulkan_context.device, SHADER_COUNT, shader_create_infos, NULL, s_shaders) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SHADER_OBJECT_CREATE)
@@ -297,7 +408,8 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
         SAFE_DESTROY(s_shaders[i], s_ext_context.destroy_shader(s_vulkan_context.device, s_shaders[i], NULL))
     }
     SAFE_DESTROY(s_shaders, free(s_shaders));
-    SAFE_DESTROY(set_layout, vkDestroyDescriptorSetLayout(s_vulkan_context.device, set_layout, NULL))
+    SAFE_DESTROY(s_layout_set, vkDestroyDescriptorSetLayout(s_vulkan_context.device, s_layout_set, NULL))
+    SAFE_DESTROY(s_descriptor_pool, vkDestroyDescriptorPool(s_vulkan_context.device, s_descriptor_pool, NULL))
     for(u32 i = 0; i < c_command_pool_count; i++) {
         SAFE_DESTROY(s_command_pools[i], vkDestroyCommandPool(s_vulkan_context.device, s_command_pools[i], NULL))
     }
@@ -307,7 +419,8 @@ _fail:
         SAFE_DESTROY(s_shaders[i], s_ext_context.destroy_shader(s_vulkan_context.device, s_shaders[i], NULL))
     }
     SAFE_DESTROY(s_shaders, free(s_shaders));
-    SAFE_DESTROY(set_layout, vkDestroyDescriptorSetLayout(s_vulkan_context.device, set_layout, NULL))
+    SAFE_DESTROY(s_layout_set, vkDestroyDescriptorSetLayout(s_vulkan_context.device, s_layout_set, NULL))
+    SAFE_DESTROY(s_descriptor_pool, vkDestroyDescriptorPool(s_vulkan_context.device, s_descriptor_pool, NULL))
     for(u32 i = 0; i < c_command_pool_count; i++) {
         SAFE_DESTROY(s_command_pools[i], vkDestroyCommandPool(s_vulkan_context.device, s_command_pools[i], NULL))
     }

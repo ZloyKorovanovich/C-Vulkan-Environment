@@ -479,9 +479,6 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
 
     // queue layout for device create info
     layoutDeviceQueues(s_vulkan_context.physical_device, c_queue_count, c_queue_flags, s_queue_locators);
-        for(u32 i = 0; i < DEVICE_QUEUE_COUNT; i++) { // HERE
-        printf("%u %u\n", s_queue_locators[i].family_id, s_queue_locators[i].local_id);
-    }
     u32 queue_family_count = 0;
     QueueLocator* queue_families = alloca(sizeof(QueueLocator) * c_queue_count);
     combineQueuesToFamilies(c_queue_count, s_queue_locators, &queue_family_count, queue_families);
@@ -526,13 +523,28 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     }
 
     // device extesnions loading
-
+    // shader object
     _LOAD_EXT_FUNC(s_ext_context.create_shaders, vkCreateShadersEXT)
     _LOAD_EXT_FUNC(s_ext_context.destroy_shader, vkDestroyShaderEXT)
     _LOAD_EXT_FUNC(s_ext_context.cmd_bind_shaders, vkCmdBindShadersEXT)
     _LOAD_EXT_FUNC(s_ext_context.cmd_set_cull_mode, vkCmdSetCullModeEXT)
     _LOAD_EXT_FUNC(s_ext_context.cmd_set_depth_write_enable, vkCmdSetDepthWriteEnableEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_vertex_input, vkCmdSetVertexInputEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_vertex_input, vkCmdSetVertexInputEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_rasterization_samples, vkCmdSetRasterizationSamplesEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_sample_mask, vkCmdSetSampleMaskEXT);
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_alpha_to_coverage_enable, vkCmdSetAlphaToOneEnableEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_alpha_to_one, vkCmdSetAlphaToOneEnableEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_polygon_mode, vkCmdSetPolygonModeEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_depth_clamp_enable, vkCmdSetDepthClampEnableEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_logic_op_enable, vkCmdSetLogicOpEnableEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_logic_op, vkCmdSetLogicOpEnableEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_color_blend_enable, vkCmdSetColorBlendEnableEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_color_write_mask, vkCmdSetColorWriteMaskEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_color_blend_equation, vkCmdSetColorBlendEquationEXT)
+    _LOAD_EXT_FUNC(s_ext_context.cmd_set_color_blend_advanced, vkCmdSetColorBlendAdvancedEXT)
     
+    // dynamic rendering
     _LOAD_EXT_FUNC(s_ext_context.cmd_begin_rendering, vkCmdBeginRenderingKHR)
     _LOAD_EXT_FUNC(s_ext_context.cmd_end_rendering, vkCmdEndRenderingKHR)
 
