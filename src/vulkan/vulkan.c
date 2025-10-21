@@ -479,9 +479,6 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
 
     // queue layout for device create info
     layoutDeviceQueues(s_vulkan_context.physical_device, c_queue_count, c_queue_flags, s_queue_locators);
-        for(u32 i = 0; i < DEVICE_QUEUE_COUNT; i++) { // HERE
-        printf("%u %u\n", s_queue_locators[i].family_id, s_queue_locators[i].local_id);
-    }
     u32 queue_family_count = 0;
     QueueLocator* queue_families = alloca(sizeof(QueueLocator) * c_queue_count);
     combineQueuesToFamilies(c_queue_count, s_queue_locators, &queue_family_count, queue_families);
@@ -500,14 +497,10 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     }
 
     // device creation
-    VkPhysicalDeviceShaderObjectFeaturesEXT shader_object_feature = (VkPhysicalDeviceShaderObjectFeaturesEXT) {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
-        .shaderObject = TRUE
-    };
     VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering_feature = (VkPhysicalDeviceDynamicRenderingFeaturesKHR) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
         .dynamicRendering = VK_TRUE,
-        .pNext = &shader_object_feature
+        .pNext = NULL
     };
     VkDeviceCreateInfo device_create_info = (VkDeviceCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -525,14 +518,7 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         vkGetDeviceQueue(s_vulkan_context.device, s_queue_locators[i].family_id, s_queue_locators[i].local_id, s_vulkan_queues + i);
     }
 
-    // device extesnions loading
-
-    _LOAD_EXT_FUNC(s_ext_context.create_shaders, vkCreateShadersEXT)
-    _LOAD_EXT_FUNC(s_ext_context.destroy_shader, vkDestroyShaderEXT)
-    _LOAD_EXT_FUNC(s_ext_context.cmd_bind_shaders, vkCmdBindShadersEXT)
-    _LOAD_EXT_FUNC(s_ext_context.cmd_set_cull_mode, vkCmdSetCullModeEXT)
-    _LOAD_EXT_FUNC(s_ext_context.cmd_set_depth_write_enable, vkCmdSetDepthWriteEnableEXT)
-    
+    // device extesnions loading    
     _LOAD_EXT_FUNC(s_ext_context.cmd_begin_rendering, vkCmdBeginRenderingKHR)
     _LOAD_EXT_FUNC(s_ext_context.cmd_end_rendering, vkCmdEndRenderingKHR)
 

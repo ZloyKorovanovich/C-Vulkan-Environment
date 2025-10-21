@@ -27,16 +27,16 @@ typedef enum {
     VK_ERR_SWAPCHAIN_TOO_MANY_IMAGES,
     VK_ERR_SWAPCHAIN_VIEW_CREATE,
 
+    VK_ERR_TRIANGLE_PIPELINE_CREATE,
 
     VK_ERR_COMMAND_POOL_CREATE,
-    VK_ERR_DESCRIPTOR_SET_LAYOUT_CREATE,
     VK_ERR_SHADER_BUFFER_ALLOCATE,
     VK_ERR_SHADER_BUFFER_LOAD,
-    VK_ERR_SHADER_OBJECT_ARRAY_ALLOCATE,
-    VK_ERR_SHADER_OBJECT_CREATE,
-    VK_ERR_COMMAND_BUFFER_ALLOCATE,
+    VK_ERR_SHADER_MODULE_ARRAY_ALLOCATE,
+    VK_ERR_SHADER_MODULE_CREATE,
     VK_ERR_RENDER_LOOP_FAIL,
 
+    VK_ERR_COMMAND_BUFFER_ALLOCATE,
     VK_ERR_SEAMAPHORE_CREATE,
     VK_ERR_FENCE_CREATE,
     VK_ERR_QUEUE_SUBMIT
@@ -65,9 +65,8 @@ typedef enum {
     VK_QUEUE_TRANSFER_BIT                                                   \
 }
 
-#define DEVICE_EXTENSION_COUNT 5
+#define DEVICE_EXTENSION_COUNT 4
 #define DEVICE_EXTENSIONS {                     \
-    VK_EXT_SHADER_OBJECT_EXTENSION_NAME,        \
     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,    \
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,            \
     VK_KHR_SPIRV_1_4_EXTENSION_NAME,            \
@@ -124,13 +123,6 @@ typedef struct {
 
 
 typedef struct {
-    // shader objects ext
-    PFN_vkCreateShadersEXT create_shaders;
-    PFN_vkDestroyShaderEXT destroy_shader;
-    PFN_vkCmdBindShadersEXT cmd_bind_shaders;
-    PFN_vkCmdSetCullModeEXT cmd_set_cull_mode;
-    PFN_vkCmdSetDepthWriteEnableEXT cmd_set_depth_write_enable;
-
     // dynamic rendering khr
     PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
     PFN_vkCmdEndRenderingKHR cmd_end_rendering;
