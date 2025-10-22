@@ -44,20 +44,6 @@ typedef struct {
     u64 buffer_size;
 } SpvProcessingInfo;
 
-/*
-(VkShaderCreateInfoEXT) {
-            .sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .nextStage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pName = SHADER_ENTRY_VERTEX,
-            .flags = 0,
-            .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
-            .pCode = (char*)shader_buffer + SHADER_LOC_TRIANGLE_V,
-            .codeSize = SHADER_SIZE_TRIANGLE_V,
-            .setLayoutCount = 1,
-            .pSetLayouts = &set_layout,
-            .pushConstantRangeCount = 0
-        },*/
 typedef struct {
     const char* flag;
     const char* entry;
@@ -107,7 +93,7 @@ b32 processSpvFile(const SpvProcessingInfo* info, u64* iterator, char* caps_name
         u64 cpy_size = fread(info->read_buffer, 1, info->buffer_size, src);
         fwrite(info->read_buffer, 1, cpy_size, info->resource);
     }
-    
+
     StageInfo stage_info;
     switch (getShaderType(caps_name)) {
         case 'V':

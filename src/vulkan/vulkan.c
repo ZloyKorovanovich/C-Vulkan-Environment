@@ -602,7 +602,6 @@ void renderTerminate(void) {
 
 // this function should be called when window is resized
 b32 recreateSwapchain(void) {
-    vkDeviceWaitIdle(s_vulkan_context.device);
     for(u32 i = 0; i < s_swapchain_image_count; i++) {
         SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_views[i], NULL))
     }

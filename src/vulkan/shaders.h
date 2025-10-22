@@ -22,21 +22,21 @@ const ShaderInfo c_shader_infos[] = {
 		.next_stage = 0,
 		.entry = SHADER_ENTRY_FRAGMENT,
 		.code_offset = 0,
-		.code_size = 336,
+		.code_size = 384,
 	},
 	(ShaderInfo) {
 		.stage = VK_SHADER_STAGE_VERTEX_BIT,
 		.next_stage = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.entry = SHADER_ENTRY_VERTEX,
-		.code_offset = 336,
-		.code_size = 728,
+		.code_offset = 384,
+		.code_size = 1076,
 	},
 };
 
 #define SHADER_ID_TRIANGLE_F 0
 #define SHADER_ID_TRIANGLE_V 1
 #define SHADER_COUNT 2
-#define SHADER_BUFFER_SIZE 1064LU
+#define SHADER_BUFFER_SIZE 1460LU
 
 #endif
 
