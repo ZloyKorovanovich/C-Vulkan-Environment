@@ -66,6 +66,9 @@ typedef enum {
     VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,                           \
     VK_QUEUE_TRANSFER_BIT                                                   \
 }
+#define QUEUE_GENERAL_ID 0
+#define QUEUE_COMPUTE_ID 1
+#define QUEUE_TRANSFER_ID 2
 
 #define DEVICE_EXTENSION_COUNT 4
 #define DEVICE_EXTENSIONS {                     \
@@ -76,9 +79,7 @@ typedef enum {
 }
 
 #define DEVICE_FEATURES (VkPhysicalDeviceFeatures){0}
-
 #define SWAPCHAIN_MAX_IMAGE_COUNT 2
-
 
 // ========================================================= HELPERS
 // =================================================================
@@ -110,16 +111,20 @@ typedef struct {
     VkInstance instance;
     VkSurfaceKHR surface;
     VkDevice device;
-    VkSwapchainKHR swapchain;
     VkPhysicalDevice physical_device;
-    QueueLocator* queue_locators;
-    VkQueue* queues;
 } VulkanContext;
 
 typedef struct {
-    SwapchainDscr* descriptor;
-    VkImage* images;
-    VkImageView* views;
+    VkCommandPool command_pools[DEVICE_QUEUE_COUNT];
+    QueueLocator queue_locators[DEVICE_QUEUE_COUNT];
+    VkQueue queues[DEVICE_QUEUE_COUNT];
+} QueueContext;
+
+typedef struct {
+    VkImage images[SWAPCHAIN_MAX_IMAGE_COUNT];
+    VkImageView views[SWAPCHAIN_MAX_IMAGE_COUNT];
+    VkSwapchainKHR swapchain;
+    SwapchainDscr descriptor;
     u32 image_count;
 } SwapchainContext;
 
@@ -129,13 +134,6 @@ typedef struct {
     PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
     PFN_vkCmdEndRenderingKHR cmd_end_rendering;
 } ExtContext;
-
-void getVulkanContext(VulkanContext* const context);
-void getSwapchainContext(SwapchainContext* const context);
-void getExtContext(ExtContext* const context);
-EventCallback getCallbackPfn(void);
-
-b32 recreateSwapchain(void);
 
 #endif // INCLUDE INTERNALS
 #endif

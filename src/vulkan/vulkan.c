@@ -98,27 +98,16 @@ const char* c_device_extensions[] = DEVICE_EXTENSIONS;
 
 const VkPhysicalDeviceFeatures c_device_features = DEVICE_FEATURES;
 
-
 static VkDebugUtilsMessengerEXT s_debug_messenger = NULL; // active only if initialized with debug flag
 static PFN_vkCreateDebugUtilsMessengerEXT ext_create_debug_messenger = NULL;
 static PFN_vkDestroyDebugUtilsMessengerEXT ext_destroy_debug_messenger = NULL;
 
-static QueueLocator s_queue_locators[DEVICE_QUEUE_COUNT] = {0};
-static VkQueue s_vulkan_queues[DEVICE_QUEUE_COUNT] = {0};
-
-static SwapchainDscr s_swapchain_descriptor = (SwapchainDscr){0};
-static u32 s_swapchain_image_count = SWAPCHAIN_MAX_IMAGE_COUNT;
-static VkImage s_swapchain_images[SWAPCHAIN_MAX_IMAGE_COUNT] = {0};
-static VkImageView s_swapchain_views[SWAPCHAIN_MAX_IMAGE_COUNT] = {0};
+static VulkanContext s_vulkan_context = (VulkanContext){0};
+static QueueContext s_queue_context = (QueueContext){0};
+static ExtContext s_ext_context = (ExtContext){0};
+static SwapchainContext s_swapchain_context = (SwapchainContext){0};
 
 static EventCallback s_callback;
-
-static VulkanContext s_vulkan_context = (VulkanContext) {
-    .queue_locators = s_queue_locators,
-    .queues = s_vulkan_queues
-};
-static ExtContext s_ext_context = (ExtContext){0};
-
 
 b32 defaultCallback(u32 code) {
     return 1;
@@ -478,14 +467,16 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     }
 
     // queue layout for device create info
-    layoutDeviceQueues(s_vulkan_context.physical_device, c_queue_count, c_queue_flags, s_queue_locators);
+    layoutDeviceQueues(s_vulkan_context.physical_device, c_queue_count, c_queue_flags, s_queue_context.queue_locators);
     u32 queue_family_count = 0;
     QueueLocator* queue_families = alloca(sizeof(QueueLocator) * c_queue_count);
-    combineQueuesToFamilies(c_queue_count, s_queue_locators, &queue_family_count, queue_families);
+    combineQueuesToFamilies(c_queue_count, s_queue_context.queue_locators, &queue_family_count, queue_families);
     
     VkDeviceQueueCreateInfo* queue_infos = alloca(sizeof(VkDeviceQueueCreateInfo) * c_queue_count);
     f32* queue_priorities = alloca(sizeof(f32) * c_queue_count); //@(Mitro): this is vk bullshit
-    SET_MEMORY(queue_priorities, 1.0f, c_queue_count, i) //@(Mitro): same reason as previous line
+    for(u32 i = 0; i < c_queue_count; i++) {
+        queue_priorities[i] = 1.0f;
+    } //@(Mitro): same reason as previous line
     for(u32 i = 0; i < queue_family_count; i++) {
         queue_infos[i] = (VkDeviceQueueCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -515,7 +506,7 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         _INVOKE_CALLBACK(VK_ERR_DEVICE_CREATE)
     }
     for(u32 i = 0; i < c_queue_count; i++) {
-        vkGetDeviceQueue(s_vulkan_context.device, s_queue_locators[i].family_id, s_queue_locators[i].local_id, s_vulkan_queues + i);
+        vkGetDeviceQueue(s_vulkan_context.device, s_queue_context.queue_locators[i].family_id, s_queue_context.queue_locators[i].local_id, s_queue_context.queues + i);
     }
 
     // device extesnions loading    
@@ -523,36 +514,36 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     _LOAD_EXT_FUNC(s_ext_context.cmd_end_rendering, vkCmdEndRenderingKHR)
 
     // swapchain creation
-    getScreenDescriptor(s_vulkan_context.window, s_vulkan_context.surface, s_vulkan_context.physical_device, &s_swapchain_descriptor);
+    getScreenDescriptor(s_vulkan_context.window, s_vulkan_context.surface, s_vulkan_context.physical_device, &s_swapchain_context.descriptor);
     VkSwapchainCreateInfoKHR swapchain_info = (VkSwapchainCreateInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = s_vulkan_context.surface,
-        .minImageCount = s_swapchain_descriptor.min_image_count,
-        .imageFormat = s_swapchain_descriptor.color_format.format,
-        .imageColorSpace = s_swapchain_descriptor.color_format.colorSpace,
-        .imageExtent = s_swapchain_descriptor.extent,
+        .minImageCount = s_swapchain_context.descriptor.min_image_count,
+        .imageFormat = s_swapchain_context.descriptor.color_format.format,
+        .imageColorSpace = s_swapchain_context.descriptor.color_format.colorSpace,
+        .imageExtent = s_swapchain_context.descriptor.extent,
+        .preTransform = s_swapchain_context.descriptor.surface_transform,
+        .presentMode = s_swapchain_context.descriptor.present_mode,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = s_swapchain_descriptor.surface_transform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = s_swapchain_descriptor.present_mode,
         .clipped = TRUE
     };
-    ERROR_CATCH(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_vulkan_context.swapchain) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_swapchain_context.swapchain) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
     }
 
-    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, NULL);
-    ERROR_CATCH(s_swapchain_image_count > SWAPCHAIN_MAX_IMAGE_COUNT) {
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_swapchain_context.swapchain, &s_swapchain_context.image_count, NULL);
+    ERROR_CATCH(s_swapchain_context.image_count > SWAPCHAIN_MAX_IMAGE_COUNT) {
         _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_TOO_MANY_IMAGES)
     }
-    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, s_swapchain_images);
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_swapchain_context.swapchain, &s_swapchain_context.image_count, s_swapchain_context.images);
     VkImageViewCreateInfo view_info = (VkImageViewCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = NULL, // set in for loop
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = s_swapchain_descriptor.color_format.format,
+        .format = s_swapchain_context.descriptor.color_format.format,
         .components.r = VK_COMPONENT_SWIZZLE_IDENTITY,
         .components.g = VK_COMPONENT_SWIZZLE_IDENTITY,
         .components.b = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -563,10 +554,22 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         .subresourceRange.baseArrayLayer = 0,
         .subresourceRange.layerCount = 1
     };
-    for(u32 i = 0; i < s_swapchain_image_count; i++) {
-        view_info.image = s_swapchain_images[i];
-        ERROR_CATCH(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
+    for(u32 i = 0; i < s_swapchain_context.image_count; i++) {
+        view_info.image = s_swapchain_context.images[i];
+        ERROR_CATCH(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_context.views + i) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
+        }
+    }
+
+    // create command pools
+    VkCommandPoolCreateInfo pool_info = (VkCommandPoolCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+    };
+    for(u32 i = 0; i < c_queue_count; i++) {
+        pool_info.queueFamilyIndex = s_queue_context.queue_locators[i].family_id;
+        pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        ERROR_CATCH(vkCreateCommandPool(s_vulkan_context.device, &pool_info, NULL, s_queue_context.command_pools + i) != VK_SUCCESS) {
+            _INVOKE_CALLBACK(VK_ERR_COMMAND_POOL_CREATE)
         }
     }
 
@@ -577,10 +580,13 @@ _fail:
 }
 
 void renderTerminate(void) {
-    for(u32 i = 0; i < s_swapchain_image_count; i++) {
-        SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_views[i], NULL))
+    for(u32 i = 0; i < c_queue_count; i++) {
+        SAFE_DESTROY(s_queue_context.command_pools[i], vkDestroyCommandPool(s_vulkan_context.device, s_queue_context.command_pools[i], NULL))
     }
-    SAFE_DESTROY(s_vulkan_context.swapchain, vkDestroySwapchainKHR(s_vulkan_context.device, s_vulkan_context.swapchain, NULL))
+    for(u32 i = 0; i < s_swapchain_context.image_count; i++) {
+        SAFE_DESTROY(s_swapchain_context.views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_context.views[i], NULL))
+    }
+    SAFE_DESTROY(s_swapchain_context.swapchain, vkDestroySwapchainKHR(s_vulkan_context.device, s_swapchain_context.swapchain, NULL))
 
     s_ext_context = (ExtContext){0}; // set extension ptrs to NULL
 
@@ -602,10 +608,10 @@ void renderTerminate(void) {
 
 // this function should be called when window is resized
 b32 recreateSwapchain(void) {
-    for(u32 i = 0; i < s_swapchain_image_count; i++) {
-        SAFE_DESTROY(s_swapchain_views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_views[i], NULL))
+    for(u32 i = 0; i < s_swapchain_context.image_count; i++) {
+        SAFE_DESTROY(s_swapchain_context.views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_context.views[i], NULL))
     }
-    SAFE_DESTROY(s_vulkan_context.swapchain, vkDestroySwapchainKHR(s_vulkan_context.device, s_vulkan_context.swapchain, NULL))
+    SAFE_DESTROY(s_swapchain_context.swapchain, vkDestroySwapchainKHR(s_vulkan_context.device, s_swapchain_context.swapchain, NULL))
 
     i32 width, height;
     glfwGetFramebufferSize(s_vulkan_context.window, &width, &height);
@@ -615,7 +621,7 @@ b32 recreateSwapchain(void) {
     }
     VkSurfaceCapabilitiesKHR capabilities;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(s_vulkan_context.physical_device, s_vulkan_context.surface, &capabilities);
-    s_swapchain_descriptor.extent = (VkExtent2D){
+    s_swapchain_context.descriptor.extent = (VkExtent2D){
         .width = CLAMP((u32)width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
         .height = CLAMP((u32)height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height)
     };
@@ -623,30 +629,30 @@ b32 recreateSwapchain(void) {
     VkSwapchainCreateInfoKHR swapchain_info = (VkSwapchainCreateInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = s_vulkan_context.surface,
-        .minImageCount = s_swapchain_descriptor.min_image_count,
-        .imageFormat = s_swapchain_descriptor.color_format.format,
-        .imageColorSpace = s_swapchain_descriptor.color_format.colorSpace,
-        .imageExtent = s_swapchain_descriptor.extent,
+        .minImageCount = s_swapchain_context.descriptor.min_image_count,
+        .imageFormat = s_swapchain_context.descriptor.color_format.format,
+        .imageColorSpace = s_swapchain_context.descriptor.color_format.colorSpace,
+        .imageExtent = s_swapchain_context.descriptor.extent,
+        .preTransform = s_swapchain_context.descriptor.surface_transform,
+        .presentMode = s_swapchain_context.descriptor.present_mode,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .preTransform = s_swapchain_descriptor.surface_transform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = s_swapchain_descriptor.present_mode,
         .clipped = TRUE
     };
-    if(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_vulkan_context.swapchain) != VK_SUCCESS) {
+    if(vkCreateSwapchainKHR(s_vulkan_context.device, &swapchain_info, NULL, &s_swapchain_context.swapchain) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
     }
 
-    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, NULL); 
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_swapchain_context.swapchain, &s_swapchain_context.image_count, NULL); 
     // @(Mitro): might cause issues if s_swapchain_image_count too big, but it shouldn't pass first sapchain creation in renderInit
-    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_vulkan_context.swapchain, &s_swapchain_image_count, s_swapchain_images);
+    vkGetSwapchainImagesKHR(s_vulkan_context.device, s_swapchain_context.swapchain, &s_swapchain_context.image_count, s_swapchain_context.images);
     VkImageViewCreateInfo view_info = (VkImageViewCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = NULL, // set in for loop
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = s_swapchain_descriptor.color_format.format,
+        .format = s_swapchain_context.descriptor.color_format.format,
         .components.r = VK_COMPONENT_SWIZZLE_IDENTITY,
         .components.g = VK_COMPONENT_SWIZZLE_IDENTITY,
         .components.b = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -657,9 +663,9 @@ b32 recreateSwapchain(void) {
         .subresourceRange.baseArrayLayer = 0,
         .subresourceRange.layerCount = 1
     };
-    for(u32 i = 0; i < s_swapchain_image_count; i++) {
-        view_info.image = s_swapchain_images[i];
-        if(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_views + i) != VK_SUCCESS) {
+    for(u32 i = 0; i < s_swapchain_context.image_count; i++) {
+        view_info.image = s_swapchain_context.images[i];
+        if(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_context.views + i) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
         }
     }
@@ -673,23 +679,18 @@ _fail:
 // ========================================================= CONTEXT
 // =================================================================
 
-void getVulkanContext(VulkanContext* const context) {
-    *context = s_vulkan_context;
+const VulkanContext* getVulkanContextPtr(void) {
+    return &s_vulkan_context;
 }
-
-void getSwapchainContext(SwapchainContext* const context) {
-    *context = (SwapchainContext) {
-        .descriptor = &s_swapchain_descriptor,
-        .images = s_swapchain_images,
-        .views = s_swapchain_views,
-        .image_count = s_swapchain_image_count
-    };
+const SwapchainContext* getSwapchainContextPtr(void) {
+    return &s_swapchain_context;
 }
-
-void getExtContext(ExtContext* const context) {
-    *context = s_ext_context;
+const QueueContext* getQueueContextPtr(void) {
+    return &s_queue_context;
 }
-
-EventCallback getCallbackPfn(void) {
+const ExtContext* getExtensionContextPtr(void) {
+    return &s_ext_context;
+}
+const EventCallback getCallbackPfn(void) {
     return s_callback;
 }
