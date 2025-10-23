@@ -15,7 +15,6 @@ b32 upFolder(char* path) {
 }
 
 b32 isSpv(const char* name) {
-    u32 len = strlen(name);
     return strstr(name, ".spv") != NULL;
 }
 
@@ -28,8 +27,8 @@ _loop:
         c -= 32;
     }
     *caps = c;
-    *caps++;
-    *name++;
+    caps++;
+    name++;
 goto _loop;
 _end:
     *caps = '\0';
@@ -112,13 +111,10 @@ b32 processSpvFile(const SpvProcessingInfo* info, u64* iterator, char* caps_name
     fprintf(info->header, 
         "\t(ShaderInfo) {\n" 
         "\t\t.stage = %s,\n"
-        "\t\t.next_stage = %s,\n"
-        "\t\t.entry = %s,\n"
         "\t\t.code_offset = %lu,\n"
         "\t\t.code_size = %lu,\n"
         "\t},\n",
-        stage_info.flag, stage_info.next, stage_info.entry,
-        *iterator, src_size
+        stage_info.flag, *iterator, src_size
     );
     *iterator += src_size;
 
@@ -173,11 +169,9 @@ int main(int argc, char** argv) {
 
     fprintf(header,
         "typedef struct {\n"
-        "\tconst char* entry;\n"
         "\tu64 code_offset;\n"
         "\tu64 code_size;\n"
         "\tu32 stage;\n"
-        "\tu32 next_stage;\n"
         "} ShaderInfo;\n\n"
         "#define SHADER_ENTRY_VERTEX \"vertexFunc\"\n"
         "#define SHADER_ENTRY_FRAGMENT \"fragmentFunc\"\n"

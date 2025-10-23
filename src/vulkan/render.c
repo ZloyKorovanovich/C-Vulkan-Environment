@@ -79,7 +79,7 @@ static u32 s_shader_module_count = 0;
 static VkShaderModule* s_shader_modules = NULL;
 
 static EventCallback s_event_callback = NULL;
-static VulkanContext s_vulkan_context = (VulkanContext){0};
+static VulkanContext s_vulkan_context = NULL;
 static ExtContext s_ext_context = (ExtContext){0};
 static SwapchainContext s_swapchain_context = (SwapchainContext){0};
 
@@ -418,49 +418,53 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     getExtContext(&s_ext_context);
     getSwapchainContext(&s_swapchain_context);
     
-    // create command pools
-    VkCommandPoolCreateInfo pool_info = (VkCommandPoolCreateInfo) {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
-    };
-    for(u32 i = 0; i < c_command_pool_count; i++) {
-        pool_info.queueFamilyIndex = s_vulkan_context.queue_locators[i].family_id;
-        pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        ERROR_CATCH(vkCreateCommandPool(s_vulkan_context.device, &pool_info, NULL, s_command_pools + i) != VK_SUCCESS) {
-            _INVOKE_CALLBACK(VK_ERR_COMMAND_POOL_CREATE)
+    u64 stack_ptr;
+    REMEMBER_RSP(stack_ptr) {
+        // create command pools
+        VkCommandPoolCreateInfo pool_info = (VkCommandPoolCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+        };
+        for(u32 i = 0; i < c_command_pool_count; i++) {
+            pool_info.queueFamilyIndex = s_vulkan_context.queue_locators[i].family_id;
+            pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            ERROR_CATCH(vkCreateCommandPool(s_vulkan_context.device, &pool_info, NULL, s_command_pools + i) != VK_SUCCESS) {
+                _INVOKE_CALLBACK(VK_ERR_COMMAND_POOL_CREATE)
+            }
         }
-    }
 
-    // read shaders and create shader objects
-    u32* shader_buffer = malloc(SHADER_BUFFER_SIZE);
-    ERROR_CATCH(!shader_buffer) {
-        _INVOKE_CALLBACK(VK_ERR_SHADER_BUFFER_ALLOCATE);
-    }
-    ERROR_CATCH(!readShaderFile(shader_path, SHADER_BUFFER_SIZE, shader_buffer)) {
-        _INVOKE_CALLBACK(VK_ERR_SHADER_BUFFER_LOAD)
-    }
+        // read shaders and create shader objects
+        u32* shader_buffer = malloc(SHADER_BUFFER_SIZE);
+        ERROR_CATCH(!shader_buffer) {
+            _INVOKE_CALLBACK(VK_ERR_SHADER_BUFFER_ALLOCATE);
+        }
+        ERROR_CATCH(!readShaderFile(shader_path, SHADER_BUFFER_SIZE, shader_buffer)) {
+            _INVOKE_CALLBACK(VK_ERR_SHADER_BUFFER_LOAD)
+        }
 
-    s_shader_module_count = SHADER_COUNT;
-    s_shader_modules = malloc(sizeof(VkShaderModule) * SHADER_COUNT);
-    ERROR_CATCH(!s_shader_modules) {
-        _INVOKE_CALLBACK(VK_ERR_SHADER_MODULE_ARRAY_ALLOCATE);
-    }
-    VkShaderModuleCreateInfo shader_module_info = (VkShaderModuleCreateInfo) {
-        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
-    };
-    for(u32 i = 0; i < SHADER_COUNT; i++) {
-        shader_module_info.pCode = (u32*)((char*)shader_buffer + c_shader_infos[i].code_offset);
-        shader_module_info.codeSize = c_shader_infos[i].code_size;
-        vkCreateShaderModule(s_vulkan_context.device, &shader_module_info, NULL, s_shader_modules + i);
-    }
-    free(shader_buffer);
+        s_shader_module_count = SHADER_COUNT;
+        s_shader_modules = malloc(sizeof(VkShaderModule) * SHADER_COUNT);
+        ERROR_CATCH(!s_shader_modules) {
+            _INVOKE_CALLBACK(VK_ERR_SHADER_MODULE_ARRAY_ALLOCATE);
+        }
+        VkShaderModuleCreateInfo shader_module_info = (VkShaderModuleCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+        };
+        for(u32 i = 0; i < SHADER_COUNT; i++) {
+            shader_module_info.pCode = (u32*)((char*)shader_buffer + c_shader_infos[i].code_offset);
+            shader_module_info.codeSize = c_shader_infos[i].code_size;
+            vkCreateShaderModule(s_vulkan_context.device, &shader_module_info, NULL, s_shader_modules + i);
+        }
+        free(shader_buffer);
 
-    s_pipeline_buffer = malloc(sizeof(void*) * c_pipeline_count * 2);
-    ERROR_CATCH(!s_pipeline_buffer) {
-        _INVOKE_CALLBACK(VK_ERR_PIPELINE_BUFFER_ALLOCATE)
-    }
-    s_pipeline_layouts = s_pipeline_buffer;
-    s_pipelines = (VkPipeline*)((void**)s_pipeline_buffer + c_pipeline_count);
-    createTrianglePipeline(s_pipelines, s_pipeline_layouts, s_shader_modules);
+        s_pipeline_buffer = malloc(sizeof(void*) * c_pipeline_count * 2);
+        ERROR_CATCH(!s_pipeline_buffer) {
+            _INVOKE_CALLBACK(VK_ERR_PIPELINE_BUFFER_ALLOCATE)
+        }
+        s_pipeline_layouts = s_pipeline_buffer;
+        s_pipelines = (VkPipeline*)((void**)s_pipeline_buffer + c_pipeline_count);
+        createTrianglePipeline(s_pipelines, s_pipeline_layouts, s_shader_modules);
+    } SET_RSP(stack_ptr)
+
 
     ERROR_CATCH(!renderLoop()) {
         _INVOKE_CALLBACK(VK_ERR_RENDER_LOOP_FAIL)
