@@ -58,10 +58,6 @@ typedef u32 Handle;
 
 typedef b32 (*UpdateCallback) (f64 time, f64 delta);
 
-
-#define REMEMBER_RSP(var_name) asm("\t mov %["#var_name"], rsp" : [var_name] "=r" (var_name));
-#define SET_RSP(var_name) asm("\t mov rsp, %["#var_name"]" : : [var_name] "r" (var_name));
-
 // =========================================================== CODES
 // =================================================================
 
