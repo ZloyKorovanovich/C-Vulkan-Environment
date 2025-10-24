@@ -26,7 +26,9 @@ i32 main(i32 argc, char** argv) {
     printf("path %s\n", shader_path);
 
     renderInit(800, 600, VULKAN_FLAG_DEBUG | VULKAN_FLAG_RESIZABLE, &debugCallback);
+    vramInit(NULL);
     renderRun(NULL, NULL, shader_path);
+    vramTerminate();
     renderTerminate();
     return 0;
 }

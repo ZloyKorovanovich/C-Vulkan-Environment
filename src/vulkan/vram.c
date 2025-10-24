@@ -1,3 +1,4 @@
+#define INCLUDE_VULKAN_INTERNALS
 #include "vulkan.h"
 
 /*
@@ -85,6 +86,83 @@
                                                            YOKO
 */
 
-b32 vramInit(void) {
-    
+extern const VulkanContext* getVulkanContextPtr(void);
+extern const QueueContext* getQueueContextPtr(void);
+extern const EventCallback getCallbackPfn(void);
+
+typedef struct {
+    VkDeviceMemory memory;
+    u64 size;
+    u32 type_id;
+    u32 flags;
+} VramBlock;
+
+static VulkanContext s_vulkan_context = (VulkanContext){0};
+static VramBlock s_vram_blocks[MEMORY_BLOCK_COUNT] = {0};
+static EventCallback s_callback = NULL;
+
+b32 layoutDeviceMemory(VkPhysicalDevice device, u32 block_count, const MemoryBlockDscr* block_dscrs, VramBlock* vram_blocks) {
+    const u64 reserved_space = 1024 * 1024;
+    VkPhysicalDeviceMemoryProperties device_memory;
+    vkGetPhysicalDeviceMemoryProperties(device, &device_memory);
+
+    for(u32 i = 0; i < block_count; i++) {
+        u64 block_size = block_dscrs[i].size;
+        u32 pos_flag = block_dscrs[i].positive_flags;
+        u32 neg_flag = block_dscrs[i].negative_flags;
+        for(u32 j = 0; j < device_memory.memoryTypeCount; j++) {
+            u32 heap_id = device_memory.memoryTypes[j].heapIndex;
+            u32 memory_flags = device_memory.memoryTypes[j].propertyFlags;
+            if(
+                device_memory.memoryHeaps[heap_id].size >= reserved_space + block_size &&
+                FLAG_IN_MASK(memory_flags, pos_flag) && FLAG_NOT_IN_MASK(memory_flags, neg_flag)
+            ) {
+                device_memory.memoryHeaps[heap_id].size -= block_size;
+                vram_blocks[i].size = block_size;
+                vram_blocks[i].type_id = j;
+                vram_blocks[i].flags = memory_flags;
+                goto _found;
+            }
+        }
+//_not_found:
+        return FALSE;
+_found:
+    }
+    return TRUE;
+}
+
+#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code, _fail)
+
+b32 vramInit(EventCallback callback) {
+    s_vulkan_context = *getVulkanContextPtr();
+    s_callback = callback ? callback : getCallbackPfn();
+
+    ERROR_CATCH(!layoutDeviceMemory(s_vulkan_context.physical_device, MEMORY_BLOCK_COUNT, (MemoryBlockDscr[])MEMORY_BLOCK_DESCRIPTORS, s_vram_blocks)) {
+        _INVOKE_CALLBACK(VK_ERR_VRAM_LAYOUT_FAIL)
+    }
+
+    VkMemoryAllocateInfo alloc_info = (VkMemoryAllocateInfo) {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+    };
+    for(u32 i = 0; i < MEMORY_BLOCK_COUNT; i++) {
+        alloc_info.allocationSize = s_vram_blocks[i].size;
+        alloc_info.memoryTypeIndex = s_vram_blocks[i].type_id;
+        ERROR_CATCH(vkAllocateMemory(s_vulkan_context.device, &alloc_info, NULL, &s_vram_blocks[i].memory) != VK_SUCCESS) {
+            _INVOKE_CALLBACK(VK_ERR_VRAM_ALLOCATE);
+        }
+    }
+
+//_sucess:
+    return TRUE;
+_fail:
+    return FALSE;
+}
+
+void vramTerminate(void) {
+    for(u32 i = 0; i < MEMORY_BLOCK_COUNT; i++) {
+        SAFE_DESTROY(s_vram_blocks[i].memory, vkFreeMemory(s_vulkan_context.device, s_vram_blocks[i].memory, NULL))
+        s_vram_blocks[i] = (VramBlock){0};
+    }
+    s_vulkan_context = (VulkanContext){0};
+    s_callback = NULL;
 }

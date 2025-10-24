@@ -419,13 +419,10 @@ _fail:
 b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path) {
     b32 func_result = TRUE;
 
-    const VulkanContext* vulkan_context = getVulkanContextPtr();
-    const QueueContext* queue_context = getQueueContextPtr();
-    const ExtContext* ext_context = getExtensionContextPtr();
+    s_vulkan_context = *getVulkanContextPtr();
+    s_queue_context = *getQueueContextPtr();
+    s_ext_context = *getExtensionContextPtr();
     r_swapchain_context = getSwapchainContextPtr();
-    s_vulkan_context = *vulkan_context;
-    s_queue_context = *queue_context;
-    s_ext_context = *ext_context;
     s_event_callback = event_callback ? event_callback : getCallbackPfn();
     
     // read shaders and create shader objects

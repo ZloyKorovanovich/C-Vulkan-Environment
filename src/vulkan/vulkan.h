@@ -7,7 +7,9 @@
 // =================================================================
 
 b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback);
+b32 vramInit(EventCallback callback);
 b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path);
+void vramTerminate(void);
 void renderTerminate(void);
 
 typedef enum {
@@ -41,7 +43,10 @@ typedef enum {
     VK_ERR_COMMAND_BUFFER_ALLOCATE,
     VK_ERR_SEAMAPHORE_CREATE,
     VK_ERR_FENCE_CREATE,
-    VK_ERR_QUEUE_SUBMIT
+    VK_ERR_QUEUE_SUBMIT,
+
+    VK_ERR_VRAM_LAYOUT_FAIL,
+    VK_ERR_VRAM_ALLOCATE
 } VulkanCodes;
 
 
@@ -59,6 +64,12 @@ typedef enum {
 // =============================================== CONTROL CONSTANTS
 // =================================================================
 
+typedef struct {
+    u64 size;
+    u32 positive_flags;
+    u32 negative_flags;
+} MemoryBlockDscr;
+
 #define DEVICE_QUEUE_COUNT 3
 #define DEVICE_QUEUE_FLAG_MASK (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT)
 #define DEVICE_QUEUE_FLAGS  {                                               \
@@ -66,6 +77,7 @@ typedef enum {
     VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,                           \
     VK_QUEUE_TRANSFER_BIT                                                   \
 }
+
 #define QUEUE_GENERAL_ID 0
 #define QUEUE_COMPUTE_ID 1
 #define QUEUE_TRANSFER_ID 2
@@ -80,6 +92,36 @@ typedef enum {
 
 #define DEVICE_FEATURES (VkPhysicalDeviceFeatures){0}
 #define SWAPCHAIN_MAX_IMAGE_COUNT 2
+
+/*
+    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT = 0x00000001,
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT = 0x00000002,
+    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT = 0x00000004,
+    VK_MEMORY_PROPERTY_HOST_CACHED_BIT = 0x00000008,
+    VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT = 0x00000010,
+    VK_MEMORY_PROPERTY_PROTECTED_BIT = 0x00000020,
+    VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD = 0x00000040,
+    VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD = 0x00000080,
+    VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV = 0x00000100,
+    VK_MEMORY_PROPERTY_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF
+*/
+
+#define MEMORY_BLOCK_COUNT 2
+#define MEMORY_BLOCK_DESCRIPTORS {                              \
+    (MemoryBlockDscr) {                                         \
+        .size = 1024 * 1024 * 4,                                \
+        .positive_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,  \
+        .negative_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT   \
+    },                                                          \
+    (MemoryBlockDscr) {                                         \
+        .size = 1024 * 1024 * 4,                                \
+        .positive_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,  \
+        .negative_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT   \
+    }                                                           \
+}
+
+#define MEMORY_BLOCK_LOCAL_ID 0
+#define MEMORY_BLOCK_TRANSFER_ID 1
 
 // ========================================================= HELPERS
 // =================================================================
@@ -99,7 +141,6 @@ typedef struct {
     VkPresentModeKHR present_mode;
     u32 min_image_count;
 } SwapchainDscr;
-
 
 // ======================================================== CONTEXTS
 // =================================================================
@@ -127,7 +168,6 @@ typedef struct {
     SwapchainDscr descriptor;
     u32 image_count;
 } SwapchainContext;
-
 
 typedef struct {
     // dynamic rendering khr

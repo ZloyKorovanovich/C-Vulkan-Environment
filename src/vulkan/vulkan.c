@@ -96,6 +96,9 @@ const u32 c_queue_flags[] = DEVICE_QUEUE_FLAGS;
 const u32 c_device_extension_count = DEVICE_EXTENSION_COUNT;
 const char* c_device_extensions[] = DEVICE_EXTENSIONS;
 
+const u32 c_memory_block_count = MEMORY_BLOCK_COUNT;
+const MemoryBlockDscr c_memory_block_descriptors[] = MEMORY_BLOCK_DESCRIPTORS;
+
 const VkPhysicalDeviceFeatures c_device_features = DEVICE_FEATURES;
 
 static VkDebugUtilsMessengerEXT s_debug_messenger = NULL; // active only if initialized with debug flag
@@ -244,20 +247,32 @@ b32 checkDeviceFeatures(VkPhysicalDevice device, const VkPhysicalDeviceFeatures*
     return TRUE;
 }
 
-/*
-b32 checkDeviceMemory(VkPhysicalDevice device, u32 block_count, const u32* block_flags, u32* const block_ids) {
-    VkPhysicalDeviceMemoryProperties device_memory_properties;
-    vkGetPhysicalDeviceMemoryProperties(device, &device_memory_properties);
+b32 checkDeviceMemory(VkPhysicalDevice device, u32 block_count, const MemoryBlockDscr* block_dscrs) {
+    const u64 reserved_space = 1024 * 1024;
+    VkPhysicalDeviceMemoryProperties device_memory;
+    vkGetPhysicalDeviceMemoryProperties(device, &device_memory);
 
     for(u32 i = 0; i < block_count; i++) {
-        u32 flag = block_flags[i];
-        for(u32 j = 0; j < device_memory_properties.memoryTypeCount; j++) {
-            u32 heap_id = device_memory_properties.memoryTypes[j].heapIndex;
-            if(device_memory_properties.memoryTypes[j].propertyFlags &)
+        u64 block_size = block_dscrs[i].size;
+        u32 pos_flag = block_dscrs[i].positive_flags;
+        u32 neg_flag = block_dscrs[i].negative_flags;
+        for(u32 j = 0; j < device_memory.memoryTypeCount; j++) {
+            u32 heap_id = device_memory.memoryTypes[j].heapIndex;
+            u32 memory_flags = device_memory.memoryTypes[j].propertyFlags;
+            if(
+                device_memory.memoryHeaps[heap_id].size >= reserved_space + block_size &&
+                FLAG_IN_MASK(memory_flags, pos_flag) && FLAG_NOT_IN_MASK(memory_flags, neg_flag)
+            ) {
+                device_memory.memoryHeaps[heap_id].size -= block_size;
+                goto _found;
+            }
         }
+//_not_found:
+        return FALSE;
+_found:
     }
+    return TRUE;
 }
-*/
 
 u32 rateDeviceScore(VkPhysicalDevice device, u32* const device_id) {
     VkPhysicalDeviceProperties device_properties;
@@ -456,6 +471,7 @@ b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         if(!layoutDeviceQueues(vk_physical_device, c_queue_count, c_queue_flags, NULL)) continue;
         if(!checkDeviceExtensions(vk_physical_device, c_device_extension_count, c_device_extensions)) continue;
         if(!checkDeviceFeatures(vk_physical_device, &c_device_features)) continue;
+        if(!checkDeviceMemory(vk_physical_device, c_memory_block_count, c_memory_block_descriptors)) continue;
         u32 score = rateDeviceScore(vk_physical_device, NULL);
         if(score >= best_score) {
             s_vulkan_context.physical_device = vk_physical_device;
@@ -674,7 +690,6 @@ b32 recreateSwapchain(void) {
 _fail:
     return FALSE;
 }
-
 
 // ========================================================= CONTEXT
 // =================================================================

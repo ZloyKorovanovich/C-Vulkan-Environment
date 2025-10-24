@@ -47,7 +47,7 @@ typedef u32 Handle;
 #define CLAMP(a, b, t) MAX(MIN(t, b), a)
 
 #define FLAG_IN_MASK(mask, flag) ((flag & mask) == flag)
-#define FLAG_NOT_IN_MASK(mask, flag) ((flag & mask) != flag)
+#define FLAG_NOT_IN_MASK(mask, flag) !(flag & mask)
 
 
 // ======================================================= FUNCTIONS
