@@ -97,9 +97,16 @@ typedef struct {
     u32 flags;
 } VramBlock;
 
+typedef struct {
+    u64 begin;
+    u64 end;
+} VramAllocation;
+
 static VulkanContext s_vulkan_context = (VulkanContext){0};
 static VramBlock s_vram_blocks[MEMORY_BLOCK_COUNT] = {0};
 static EventCallback s_callback = NULL;
+
+static VramAllocation* s_vram_allocations = NULL;
 
 b32 layoutDeviceMemory(VkPhysicalDevice device, u32 block_count, const MemoryBlockDscr* block_dscrs, VramBlock* vram_blocks) {
     const u64 reserved_space = 1024 * 1024;
@@ -152,6 +159,14 @@ b32 vramInit(EventCallback callback) {
         }
     }
 
+    s_vram_allocations = malloc(sizeof(VramAllocation) * MEMORY_BLOCK_COUNT * MEMORY_BLOCK_MAX_ALLOCATIONS);
+    ERROR_CATCH(!s_vram_allocations) {
+        _INVOKE_CALLBACK(VK_ERR_VRAM_ALLOCATIONS_ARRAY_ALLOCATE)
+    }
+    for(u32 i = 0; i < MEMORY_BLOCK_MAX_ALLOCATIONS; i++) {
+        s_vram_allocations[i] = (VramAllocation){0};
+    };
+
 //_sucess:
     return TRUE;
 _fail:
@@ -159,10 +174,28 @@ _fail:
 }
 
 void vramTerminate(void) {
+    SAFE_DESTROY(s_vram_allocations, free(s_vram_allocations));
     for(u32 i = 0; i < MEMORY_BLOCK_COUNT; i++) {
         SAFE_DESTROY(s_vram_blocks[i].memory, vkFreeMemory(s_vulkan_context.device, s_vram_blocks[i].memory, NULL))
         s_vram_blocks[i] = (VramBlock){0};
     }
     s_vulkan_context = (VulkanContext){0};
     s_callback = NULL;
+}
+
+b32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const allocation_id) {
+    u64 allocation_size = 0;
+    VkMemoryRequirements memory_requirements;
+    u32 type_id = s_vram_blocks[block_id].type_id;
+    for(u32 i = 0; i < buffer_count; i++) {
+        vkGetBufferMemoryRequirements(s_vulkan_context.device, buffers[i], &memory_requirements);
+        if(!(BIT(type_id) & memory_requirements.memoryTypeBits)) {
+            _INVOKE_CALLBACK(VK_ERR_VRAM_NOT_SUITABLE_FOR_BUFFER)
+        }
+        allocation_size += memory_requirements.size;
+    }
+//_sucess:
+    return TRUE;
+_fail:
+    return FALSE;
 }

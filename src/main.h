@@ -49,6 +49,7 @@ typedef u32 Handle;
 #define FLAG_IN_MASK(mask, flag) ((flag & mask) == flag)
 #define FLAG_NOT_IN_MASK(mask, flag) !(flag & mask)
 
+#define BIT(bit) (1 << bit)
 
 // ======================================================= FUNCTIONS
 // =================================================================

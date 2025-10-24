@@ -46,7 +46,9 @@ typedef enum {
     VK_ERR_QUEUE_SUBMIT,
 
     VK_ERR_VRAM_LAYOUT_FAIL,
-    VK_ERR_VRAM_ALLOCATE
+    VK_ERR_VRAM_ALLOCATE,
+    VK_ERR_VRAM_ALLOCATIONS_ARRAY_ALLOCATE,
+    VK_ERR_VRAM_NOT_SUITABLE_FOR_BUFFER
 } VulkanCodes;
 
 
@@ -119,6 +121,8 @@ typedef struct {
         .negative_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT   \
     }                                                           \
 }
+
+#define MEMORY_BLOCK_MAX_ALLOCATIONS 32
 
 #define MEMORY_BLOCK_LOCAL_ID 0
 #define MEMORY_BLOCK_TRANSFER_ID 1
