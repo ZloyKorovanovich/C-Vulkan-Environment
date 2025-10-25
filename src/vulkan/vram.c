@@ -219,57 +219,6 @@ typedef enum {
     VRAM_FREE_ALREADY_EMPTY
 } vramAllocateCodes;
 
-/*
-u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id) {
-    VramAllocation allocation = (VramAllocation){0};
-    VkMemoryRequirements memory_requirements;
-    u32 type_id = s_vram_blocks[block_id].type_id;
-    for(u32 i = 0; i < buffer_count; i++) {
-        vkGetBufferMemoryRequirements(s_vulkan_context.device, buffers[i], &memory_requirements);
-        ERROR_CATCH(!(BIT(type_id) & memory_requirements.memoryTypeBits)) {
-            return VRAM_ALLOCATE_WRONG_MEMORY_TYPE;
-        }
-        allocation.size += memory_requirements.size;
-    }
-    ERROR_CATCH(allocation.size > s_vram_blocks[block_id].size) {
-        return VRAM_ALLOCATE_ALLOCATION_BIGGER_THAN_BLOCK;
-    }
-
-    ERROR_CATCH(VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id) == MEMORY_BLOCK_MAX_ALLOCATIONS) {
-        return VRAM_ALLOCATE_TOO_MANY_ALLOCATIONS;
-    }
-
-    // search for suitable space
-    u32 free_block_count = VRAM_ALLOCATION_COUNT(s_vram_free_space_counts, block_id);
-    for(u32 i = 0; i < free_block_count; i++) {
-        VramAllocation free_space = VRAM_ALLOCATION(s_vram_free_spaces, block_id, i); 
-        if(free_space.size >= allocation.size) {
-            // found suitable space
-            allocation.offset = free_space.offset;
-            free_space.offset += allocation.size;
-            free_space.size = free_space.size - allocation.size;
-            // this keeps free space ordered from smallest to biggest
-            for(u32 j = 0; j < i; j++) {
-                if(VRAM_ALLOCATION(s_vram_free_spaces, block_id, j).size > free_space.size) {
-                    // displace and put value to j
-                    free_block_count++;
-                    for(u32 k = j + 1; k < free_block_count; k++) {
-                        VRAM_ALLOCATION(s_vram_free_spaces, block_id, k) = VRAM_ALLOCATION(s_vram_free_spaces, block_id, k - 1);
-                    }
-                    VRAM_ALLOCATION(s_vram_free_spaces, block_id, j) = free_space;
-                    VRAM_ALLOCATION_COUNT(s_vram_free_space_counts, block_id) = free_block_count;
-                    u32 allocation_count = VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id);
-                    VRAM_ALLOCATION(s_vram_allocations, block_id, allocation_count) = allocation;
-                    VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id) = allocation_count + 1;
-                    *alloc_id = allocation_count;
-                    return VRAM_ALLOCATE_SUCESS;
-                }
-            }
-        }
-    }
-    return VRAM_ALLOCATE_FAILED_TO_FIND_FREE_SAPCE;
-}
-*/
 u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
     VramAllocation allocation = (VramAllocation){
         .size = size
@@ -318,7 +267,7 @@ u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
             allocation_count = VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id);
             for(u32 j = 0; j < MEMORY_BLOCK_MAX_ALLOCATIONS; j++) {
                 VramAllocation alloc_slot = VRAM_ALLOCATION(s_vram_allocations, block_id, j);
-                if(alloc_slot.offset == 0 && alloc_slot.size == 0) {
+                if(!(alloc_slot.offset || alloc_slot.size)) {
                     VRAM_ALLOCATION(s_vram_allocations, block_id, j) = allocation;
                     *alloc_id = j;
                     break;
@@ -331,9 +280,23 @@ u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
     return VRAM_ALLOCATE_FAILED_TO_FIND_FREE_SAPCE;
 }
 
+u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id) {
+    u64 allocation_size = 0;
+    VkMemoryRequirements memory_requirements;
+    u32 type_id = s_vram_blocks[block_id].type_id;
+    for(u32 i = 0; i < buffer_count; i++) {
+        vkGetBufferMemoryRequirements(s_vulkan_context.device, buffers[i], &memory_requirements);
+        ERROR_CATCH(!(BIT(type_id) & memory_requirements.memoryTypeBits)) {
+            return VRAM_ALLOCATE_WRONG_MEMORY_TYPE;
+        }
+        allocation_size += memory_requirements.size;
+    }
+    return vramAllocate(allocation_size, block_id, alloc_id);
+}
+
 u32 vramFreeAllocation(u32 block_id, u32 alloc_id) {
     VramAllocation allocation = VRAM_ALLOCATION(s_vram_allocations, block_id, alloc_id);
-    if(!allocation.size && !allocation.offset) {
+    if(!(allocation.size || allocation.offset)) {
         return VRAM_FREE_ALREADY_EMPTY;
     }
     u32 block_allocation_count = VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id) - 1; // copy of count
@@ -346,17 +309,14 @@ u32 vramFreeAllocation(u32 block_id, u32 alloc_id) {
     u32 space_id = 0;
     for(u32 i = 0; i < block_free_space_count; i++) {
         VramAllocation space = VRAM_ALLOCATION(s_vram_free_spaces, block_id, i);
-        if(space.offset + space.size == allocation.offset) {
-            allocation.offset = space.offset;
-            allocation.size += space.size;
-            left_id = i;
-            left_exists = 1;
-        } //@(Mitro): we can do no branching here
-        if(allocation.offset + allocation.size == space.offset) {
-            allocation.size += space.size;
-            right_id = i;
-            right_exists = 1;
-        }
+
+        left_exists = (space.offset + space.size == allocation.offset);
+        right_exists = (allocation.offset + allocation.size == space.offset);
+        left_id = left_exists ? i : left_id;
+        right_id = right_exists ? i : right_id;
+
+        allocation.offset = left_exists ? space.offset : allocation.offset;
+        allocation.size = (right_exists || left_exists) ? allocation.size + space.size : allocation.size;
         space_id = (space.size < allocation.size) ? i + 1 : space_id;
     }
     if(space_id >= MEMORY_BLOCK_MAX_ALLOCATIONS) {
