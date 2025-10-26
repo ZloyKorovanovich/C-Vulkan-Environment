@@ -89,7 +89,6 @@
 
 extern const VulkanContext* getVulkanContextPtr(void);
 extern const QueueContext* getQueueContextPtr(void);
-extern const EventCallback getCallbackPfn(void);
 
 typedef struct {
     VkDeviceMemory memory;
@@ -103,7 +102,6 @@ typedef struct {
     u64 size;
 } VramAllocation;
 
-static VulkanContext s_vulkan_context = (VulkanContext){0};
 static VramBlock s_vram_blocks[MEMORY_BLOCK_COUNT] = {0};
 static EventCallback s_callback = NULL;
 
@@ -149,10 +147,10 @@ _found:
 #define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code, _fail)
 
 b32 vramInit(EventCallback callback) {
-    s_vulkan_context = *getVulkanContextPtr();
-    s_callback = callback ? callback : getCallbackPfn();
+    VulkanContext vulkan_context = *getVulkanContextPtr();
+    s_callback = callback ? callback : vulkan_context.callback;
 
-    ERROR_CATCH(!layoutDeviceMemory(s_vulkan_context.physical_device, MEMORY_BLOCK_COUNT, (MemoryBlockDscr[])MEMORY_BLOCK_DESCRIPTORS, s_vram_blocks)) {
+    ERROR_CATCH(!layoutDeviceMemory(vulkan_context.physical_device, MEMORY_BLOCK_COUNT, (MemoryBlockDscr[])MEMORY_BLOCK_DESCRIPTORS, s_vram_blocks)) {
         _INVOKE_CALLBACK(VK_ERR_VRAM_LAYOUT_FAIL)
     }
 
@@ -162,7 +160,7 @@ b32 vramInit(EventCallback callback) {
     for(u32 i = 0; i < MEMORY_BLOCK_COUNT; i++) {
         alloc_info.allocationSize = s_vram_blocks[i].size;
         alloc_info.memoryTypeIndex = s_vram_blocks[i].type_id;
-        ERROR_CATCH(vkAllocateMemory(s_vulkan_context.device, &alloc_info, NULL, &s_vram_blocks[i].memory) != VK_SUCCESS) {
+        ERROR_CATCH(vkAllocateMemory(vulkan_context.device, &alloc_info, NULL, &s_vram_blocks[i].memory) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_VRAM_ALLOCATE);
         }
     }
@@ -196,14 +194,15 @@ _fail:
 }
 
 void vramTerminate(void) {
+    VulkanContext vulkan_context = *getVulkanContextPtr();
     SAFE_DESTROY(s_vram_allocation_buffer, free(s_vram_allocation_buffer));
     s_vram_allocations = s_vram_free_spaces = NULL;
     s_vram_allocation_counts = s_vram_free_space_counts = NULL;
     for(u32 i = 0; i < MEMORY_BLOCK_COUNT; i++) {
-        SAFE_DESTROY(s_vram_blocks[i].memory, vkFreeMemory(s_vulkan_context.device, s_vram_blocks[i].memory, NULL))
+        SAFE_DESTROY(s_vram_blocks[i].memory, vkFreeMemory(vulkan_context.device, s_vram_blocks[i].memory, NULL))
         s_vram_blocks[i] = (VramBlock){0};
     }
-    s_vulkan_context = (VulkanContext){0};
+    vulkan_context = (VulkanContext){0};
     s_callback = NULL;
 }
 
@@ -280,16 +279,14 @@ u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
     return VRAM_ALLOCATE_FAILED_TO_FIND_FREE_SAPCE;
 }
 
-u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id) {
+u32 vramAllocateBuffers(u32 buffer_count, const VkMemoryRequirements* buffer_requirements, u32 block_id, u32* const alloc_id) {
     u64 allocation_size = 0;
-    VkMemoryRequirements memory_requirements;
     u32 type_id = s_vram_blocks[block_id].type_id;
     for(u32 i = 0; i < buffer_count; i++) {
-        vkGetBufferMemoryRequirements(s_vulkan_context.device, buffers[i], &memory_requirements);
-        ERROR_CATCH(!(BIT(type_id) & memory_requirements.memoryTypeBits)) {
+        ERROR_CATCH(!(BIT(type_id) & buffer_requirements[i].memoryTypeBits)) {
             return VRAM_ALLOCATE_WRONG_MEMORY_TYPE;
         }
-        allocation_size += memory_requirements.size;
+        allocation_size += buffer_requirements[i].size;
     }
     return vramAllocate(allocation_size, block_id, alloc_id);
 }
@@ -336,22 +333,23 @@ u32 vramFreeAllocation(u32 block_id, u32 alloc_id) {
 }
 
 void vramDebugPrintLayout(void) {
+    printf("VRAM.C DEBUG LAYOUT:\n");
     for(u32 i = 0; i < MEMORY_BLOCK_COUNT; i++) {
-        printf("block_id: %u {\n", i);
+        printf("\tblock_id: %u {\n", i);
         u32 alloc_count = VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, i);
-        printf("\tallocation_count: %u\n", alloc_count);
+        printf("\t\tallocation_count: %u\n", alloc_count);
         for(u32 j = 0; j < MEMORY_BLOCK_MAX_ALLOCATIONS; j++) {
             VramAllocation allocation = VRAM_ALLOCATION(s_vram_allocations, i, j);
             if(!allocation.size && !allocation.offset) continue;
-            printf("\t\tallocation_id: %u offset: %lu size: %lu\n", j, allocation.offset, allocation.size);
+            printf("\t\t\tallocation_id: %u offset: %lu size: %lu\n", j, allocation.offset, allocation.size);
         }
 
         u32 free_count = VRAM_ALLOCATION_COUNT(s_vram_free_space_counts, i);
-        printf("\tfree_space_count: %u\n", free_count);
+        printf("\t\tfree_space_count: %u\n", free_count);
         for(u32 j = 0; j < free_count; j++) {
             VramAllocation space = VRAM_ALLOCATION(s_vram_free_spaces, i, j);
-            printf("\t\tfree_sapce_id: %u offset: %lu size: %lu\n", j, space.offset, space.size);
+            printf("\t\t\tfree_sapce_id: %u offset: %lu size: %lu\n", j, space.offset, space.size);
         }
-        printf("}\n");
+        printf("\t}\n");
     }
 }

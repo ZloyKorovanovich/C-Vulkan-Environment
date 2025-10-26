@@ -75,7 +75,6 @@ extern const VulkanContext* getVulkanContextPtr(void);
 extern const SwapchainContext* getSwapchainContextPtr(void);
 extern const QueueContext* getQueueContextPtr(void);
 extern const ExtContext* getExtensionContextPtr(void);
-extern const EventCallback getCallbackPfn(void);
 
 extern b32 recreateSwapchain(void);
  
@@ -90,11 +89,6 @@ static u32 c_pipeline_count = PIPELINE_COUNT;
 static void* s_pipeline_buffer = NULL; 
 static VkPipeline* s_pipelines = NULL;
 static VkPipelineLayout* s_pipeline_layouts = NULL;
-
-static const SwapchainContext* r_swapchain_context; // often changes, every time window resizes swapchain changes
-static VulkanContext s_vulkan_context = (VulkanContext){0}; // rarely changes (practically immutable)
-static QueueContext s_queue_context = (QueueContext){0}; // rarely changes (practically immutable)
-static ExtContext s_ext_context = (ExtContext){0}; // functions always should be near
 
 static EventCallback s_event_callback = NULL;
 
@@ -111,7 +105,7 @@ b32 readShaderFile(const char* path, u64 buffer_size, u32* const buffer) {
     return TRUE;
 }
 
-b32 createTrianglePipeline(VkPipeline* const pipeline, VkPipelineLayout* const layout, const VkShaderModule* shader_modules) {
+b32 createTrianglePipeline(VkDevice device, const VkShaderModule* shader_modules, VkPipeline* const pipeline, VkPipelineLayout* const layout) {
     VkPipelineLayoutCreateInfo layout_info = (VkPipelineLayoutCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .flags = 0,
@@ -120,7 +114,7 @@ b32 createTrianglePipeline(VkPipeline* const pipeline, VkPipelineLayout* const l
         .pushConstantRangeCount = 0,
         .setLayoutCount = 0
     };
-    ERROR_CATCH(vkCreatePipelineLayout(s_vulkan_context.device, &layout_info, NULL, layout) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreatePipelineLayout(device, &layout_info, NULL, layout) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_TRIANGLE_PIPELINE_LAYOUT_CREATE)
     }
 
@@ -202,7 +196,7 @@ b32 createTrianglePipeline(VkPipeline* const pipeline, VkPipelineLayout* const l
     VkPipelineRenderingCreateInfoKHR rendering_create_info = (VkPipelineRenderingCreateInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
         .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &r_swapchain_context->descriptor.color_format.format
+        .pColorAttachmentFormats = &getSwapchainContextPtr()->descriptor.color_format.format
     };
 
     VkPipelineViewportStateCreateInfo viewport_state = (VkPipelineViewportStateCreateInfo) {
@@ -230,7 +224,7 @@ b32 createTrianglePipeline(VkPipeline* const pipeline, VkPipelineLayout* const l
         .pNext = &rendering_create_info
     };
 
-    ERROR_CATCH(vkCreateGraphicsPipelines(s_vulkan_context.device, NULL, 1, &pipeline_info, NULL, pipeline) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateGraphicsPipelines(device, NULL, 1, &pipeline_info, NULL, pipeline) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_TRIANGLE_PIPELINE_CREATE)
     }
 _fail:
@@ -241,18 +235,23 @@ _fail:
 // =================================================================
 
 b32 renderLoop(void) {
-    static VkSemaphore s_image_available_semaphore = NULL;
-    static VkSemaphore s_image_finished_semaphore = NULL;
-    static VkFence s_in_flight_fence = NULL;
+    VulkanContext vulkan_context = *getVulkanContextPtr();
+    QueueContext queue_context = *getQueueContextPtr();
+    ExtContext ext_context = *getExtensionContextPtr();
+
+    VkSemaphore image_available_semaphore;
+    VkSemaphore image_finished_semaphore;
+    VkFence in_flight_fence;
+    b32 func_result;
 
     VkCommandBuffer command_buffer;
     VkCommandBufferAllocateInfo cmbuffers_info = (VkCommandBufferAllocateInfo) {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandBufferCount = 1,
-        .commandPool = s_queue_context.command_pools[QUEUE_GENERAL_ID],
+        .commandPool = queue_context.command_pools[QUEUE_GENERAL_ID],
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
     };
-    ERROR_CATCH(vkAllocateCommandBuffers(s_vulkan_context.device, &cmbuffers_info, &command_buffer) != VK_SUCCESS) {
+    ERROR_CATCH(vkAllocateCommandBuffers(vulkan_context.device, &cmbuffers_info, &command_buffer) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_COMMAND_BUFFER_ALLOCATE)
     }
     VkSemaphoreCreateInfo semaphore_info = (VkSemaphoreCreateInfo) {
@@ -262,13 +261,13 @@ b32 renderLoop(void) {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
-    ERROR_CATCH(vkCreateSemaphore(s_vulkan_context.device, &semaphore_info, NULL, &s_image_available_semaphore) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateSemaphore(vulkan_context.device, &semaphore_info, NULL, &image_available_semaphore) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SEAMAPHORE_CREATE)
     };
-    ERROR_CATCH(vkCreateSemaphore(s_vulkan_context.device, &semaphore_info, NULL, &s_image_finished_semaphore) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateSemaphore(vulkan_context.device, &semaphore_info, NULL, &image_finished_semaphore) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_SEAMAPHORE_CREATE)
     };
-    ERROR_CATCH(vkCreateFence(s_vulkan_context.device, &fence_info, NULL, &s_in_flight_fence)) {
+    ERROR_CATCH(vkCreateFence(vulkan_context.device, &fence_info, NULL, &in_flight_fence)) {
         _INVOKE_CALLBACK(VK_ERR_FENCE_CREATE)
     }
 
@@ -318,18 +317,18 @@ b32 renderLoop(void) {
     u32 image_id;
 
     // render loop
-    while(!glfwWindowShouldClose(s_vulkan_context.window)) {
+    while(!glfwWindowShouldClose(vulkan_context.window)) {
         glfwPollEvents();
-        vkWaitForFences(s_vulkan_context.device, 1, &s_in_flight_fence, VK_TRUE, U32_MAX);
-        VkResult image_acquire_result = vkAcquireNextImageKHR(s_vulkan_context.device, r_swapchain_context->swapchain, U32_MAX, s_image_available_semaphore, NULL, &image_id);
+        vkWaitForFences(vulkan_context.device, 1, &in_flight_fence, VK_TRUE, U32_MAX);
+        VkResult image_acquire_result = vkAcquireNextImageKHR(vulkan_context.device, getSwapchainContextPtr()->swapchain, U32_MAX, image_available_semaphore, NULL, &image_id);
         if(image_acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
-            vkDeviceWaitIdle(s_vulkan_context.device);
+            vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();
             continue;
         }
 
         vk_rendeirng_info.renderArea = (VkRect2D) {
-            .extent = r_swapchain_context->descriptor.extent,
+            .extent = getSwapchainContextPtr()->descriptor.extent,
             .offset = (VkOffset2D){0}
         };
         viewport = (VkViewport) {
@@ -341,7 +340,7 @@ b32 renderLoop(void) {
             .y = 0
         };
 
-        vkResetFences(s_vulkan_context.device, 1, &s_in_flight_fence);
+        vkResetFences(vulkan_context.device, 1, &in_flight_fence);
         vkResetCommandBuffer(command_buffer, 0);
         VkCommandBufferBeginInfo command_buffer_begin_info = (VkCommandBufferBeginInfo) {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -350,13 +349,13 @@ b32 renderLoop(void) {
         };
         vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);//@(Mitro): should chekc error if fails
 
-        image_memory_top_barrier.image = r_swapchain_context->images[image_id];
+        image_memory_top_barrier.image = getSwapchainContextPtr()->images[image_id];
         vkCmdPipelineBarrier(
             command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
             0, 0, NULL, 0, NULL, 1, &image_memory_top_barrier
         );
-        color_attachment.imageView = r_swapchain_context->views[image_id];
-        s_ext_context.cmd_begin_rendering(command_buffer, &vk_rendeirng_info);
+        color_attachment.imageView = getSwapchainContextPtr()->views[image_id];
+        ext_context.cmd_begin_rendering(command_buffer, &vk_rendeirng_info);
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipelines[0]);
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
@@ -365,8 +364,8 @@ b32 renderLoop(void) {
         vkCmdDraw(command_buffer, 3, 1, 0, 0);
         //... DRAW here
 
-        s_ext_context.cmd_end_rendering(command_buffer);
-        image_memory_bottom_barrier.image = r_swapchain_context->images[image_id];
+        ext_context.cmd_end_rendering(command_buffer);
+        image_memory_bottom_barrier.image = getSwapchainContextPtr()->images[image_id];
         vkCmdPipelineBarrier(
             command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
             0, 0, NULL, 0, NULL, 1, &image_memory_bottom_barrier
@@ -376,55 +375,51 @@ b32 renderLoop(void) {
         VkSubmitInfo submit_info = (VkSubmitInfo) {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &s_image_available_semaphore,
+            .pWaitSemaphores = &image_available_semaphore,
             .pWaitDstStageMask = (const VkPipelineStageFlags[]){VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &s_image_finished_semaphore,
+            .pSignalSemaphores = &image_finished_semaphore,
             .commandBufferCount = 1,
             .pCommandBuffers = &command_buffer
         };
-        ERROR_CATCH(vkQueueSubmit(s_queue_context.queues[QUEUE_GENERAL_ID], 1, &submit_info, s_in_flight_fence) != VK_SUCCESS) {
+        ERROR_CATCH(vkQueueSubmit(queue_context.queues[QUEUE_GENERAL_ID], 1, &submit_info, in_flight_fence) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_QUEUE_SUBMIT)
         }
 
         VkPresentInfoKHR present_info = (VkPresentInfoKHR) {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &s_image_finished_semaphore,
+            .pWaitSemaphores = &image_finished_semaphore,
             .swapchainCount = 1,
-            .pSwapchains = &r_swapchain_context->swapchain,
+            .pSwapchains = &getSwapchainContextPtr()->swapchain,
             .pImageIndices = &image_id,
             .pResults = NULL
         };
-        VkResult present_result = vkQueuePresentKHR(s_queue_context.queues[QUEUE_GENERAL_ID], &present_info);
+        VkResult present_result = vkQueuePresentKHR(queue_context.queues[QUEUE_GENERAL_ID], &present_info);
         if(present_result == VK_ERROR_OUT_OF_DATE_KHR) {
-            vkDeviceWaitIdle(s_vulkan_context.device);
+            vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();
             continue;
         }
     }
-    vkDeviceWaitIdle(s_vulkan_context.device);
+    vkDeviceWaitIdle(vulkan_context.device);
 
 //_sucess:
-    SAFE_DESTROY(s_image_available_semaphore, vkDestroySemaphore(s_vulkan_context.device, s_image_available_semaphore, NULL))
-    SAFE_DESTROY(s_image_finished_semaphore, vkDestroySemaphore(s_vulkan_context.device, s_image_finished_semaphore, NULL))
-    SAFE_DESTROY(s_in_flight_fence, vkDestroyFence(s_vulkan_context.device, s_in_flight_fence, NULL))
-    return TRUE;
+    func_result = TRUE;
+    goto _dispose;
 _fail:
-    SAFE_DESTROY(s_image_available_semaphore, vkDestroySemaphore(s_vulkan_context.device, s_image_available_semaphore, NULL))
-    SAFE_DESTROY(s_image_finished_semaphore, vkDestroySemaphore(s_vulkan_context.device, s_image_finished_semaphore, NULL))
-    SAFE_DESTROY(s_in_flight_fence, vkDestroyFence(s_vulkan_context.device, s_in_flight_fence, NULL))
-    return FALSE;
+    func_result = FALSE;
+_dispose:
+    SAFE_DESTROY(image_available_semaphore, vkDestroySemaphore(vulkan_context.device, image_available_semaphore, NULL))
+    SAFE_DESTROY(image_finished_semaphore, vkDestroySemaphore(vulkan_context.device, image_finished_semaphore, NULL))
+    SAFE_DESTROY(in_flight_fence, vkDestroyFence(vulkan_context.device, in_flight_fence, NULL))
+    return func_result;
 }
 
 b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path) {
-    b32 func_result = TRUE;
-
-    s_vulkan_context = *getVulkanContextPtr();
-    s_queue_context = *getQueueContextPtr();
-    s_ext_context = *getExtensionContextPtr();
-    r_swapchain_context = getSwapchainContextPtr();
-    s_event_callback = event_callback ? event_callback : getCallbackPfn();
+    VulkanContext vulkan_context = *getVulkanContextPtr();
+    s_event_callback = event_callback ? event_callback : vulkan_context.callback;
+    b32 func_result;
     
     // read shaders and create shader objects
     u32* shader_buffer = malloc(SHADER_BUFFER_SIZE);
@@ -446,35 +441,37 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     for(u32 i = 0; i < SHADER_COUNT; i++) {
         shader_module_info.pCode = (u32*)((char*)shader_buffer + c_shader_infos[i].code_offset);
         shader_module_info.codeSize = c_shader_infos[i].code_size;
-        vkCreateShaderModule(s_vulkan_context.device, &shader_module_info, NULL, s_shader_modules + i);
+        vkCreateShaderModule(vulkan_context.device, &shader_module_info, NULL, s_shader_modules + i);
     }
     free(shader_buffer);
 
+    // pipelines creation
     s_pipeline_buffer = malloc(sizeof(void*) * c_pipeline_count * 2);
     ERROR_CATCH(!s_pipeline_buffer) {
         _INVOKE_CALLBACK(VK_ERR_PIPELINE_BUFFER_ALLOCATE)
     }
     s_pipeline_layouts = s_pipeline_buffer;
     s_pipelines = (VkPipeline*)((void**)s_pipeline_buffer + c_pipeline_count);
-    createTrianglePipeline(s_pipelines, s_pipeline_layouts, s_shader_modules);
+    createTrianglePipeline(vulkan_context.device, s_shader_modules, s_pipelines, s_pipeline_layouts);
 
     ERROR_CATCH(!renderLoop()) {
         _INVOKE_CALLBACK(VK_ERR_RENDER_LOOP_FAIL)
     }
 
 //_sucess:
+    func_result = TRUE;
     goto _end;
 _fail:
     func_result = FALSE;
 _end:
     for(u32 i = 0; i < c_pipeline_count; i++) {
-        SAFE_DESTROY(s_pipelines[i], vkDestroyPipeline(s_vulkan_context.device, s_pipelines[i], NULL))
+        SAFE_DESTROY(s_pipelines[i], vkDestroyPipeline(vulkan_context.device, s_pipelines[i], NULL))
     }
     for(u32 i = 0; i < c_pipeline_count; i++) {
-        SAFE_DESTROY(s_pipeline_layouts[i], vkDestroyPipelineLayout(s_vulkan_context.device, s_pipeline_layouts[i], NULL))
+        SAFE_DESTROY(s_pipeline_layouts[i], vkDestroyPipelineLayout(vulkan_context.device, s_pipeline_layouts[i], NULL))
     }
     for(u32 i = 0; i < s_shader_module_count; i++) {
-        SAFE_DESTROY(s_shader_modules[i], vkDestroyShaderModule(s_vulkan_context.device, s_shader_modules[i], NULL))
+        SAFE_DESTROY(s_shader_modules[i], vkDestroyShaderModule(vulkan_context.device, s_shader_modules[i], NULL))
     }
     SAFE_DESTROY(s_shader_modules, free(s_shader_modules));
     return func_result;

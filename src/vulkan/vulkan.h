@@ -158,6 +158,7 @@ typedef struct {
     VkSurfaceKHR surface;
     VkDevice device;
     VkPhysicalDevice physical_device;
+    EventCallback callback;
 } VulkanContext;
 
 typedef struct {

@@ -110,8 +110,6 @@ static QueueContext s_queue_context = (QueueContext){0};
 static ExtContext s_ext_context = (ExtContext){0};
 static SwapchainContext s_swapchain_context = (SwapchainContext){0};
 
-static EventCallback s_callback;
-
 b32 defaultCallback(u32 code) {
     return 1;
 }
@@ -355,7 +353,7 @@ void getScreenDescriptor(GLFWwindow* window, VkSurfaceKHR surface, VkPhysicalDev
 // ================================================ RENDER INTERFACE
 // =================================================================
 
-#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code, _fail)
+#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_vulkan_context.callback, code, _fail)
 #define _LOAD_EXT_FUNC(pfn, name)                                               \
 pfn = (void*)vkGetInstanceProcAddr(s_vulkan_context.instance, #name);           \
 if(!pfn) {                                                                      \
@@ -364,7 +362,7 @@ if(!pfn) {                                                                      
 
 b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     // necessary to do the work and handle VK_ERRs
-    s_callback = callback ? callback : &defaultCallback;
+    s_vulkan_context.callback = callback ? callback : &defaultCallback;
 
     // creating window
     ERROR_CATCH(!glfwInit()) {
@@ -620,6 +618,7 @@ void renderTerminate(void) {
     SAFE_DESTROY(s_vulkan_context.instance, vkDestroyInstance(s_vulkan_context.instance, NULL))
     SAFE_DESTROY(s_vulkan_context.window, glfwDestroyWindow(s_vulkan_context.window))
     glfwTerminate();
+    s_vulkan_context.callback = NULL;
 }
 
 // this function should be called when window is resized
@@ -705,7 +704,4 @@ const QueueContext* getQueueContextPtr(void) {
 }
 const ExtContext* getExtensionContextPtr(void) {
     return &s_ext_context;
-}
-const EventCallback getCallbackPfn(void) {
-    return s_callback;
 }
