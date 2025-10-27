@@ -1,4 +1,4 @@
-#define INCLUDE_VULKAN_INTERNALS
+#define INCLUDE_VULKAN_INTERNAL
 #include "vulkan.h"
 
 /*
@@ -240,6 +240,8 @@ u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
             allocation.offset = free_space.offset;
             free_space.offset += allocation.size;
             free_space.size = free_space.size - allocation.size;
+            allocation.size = (free_space.size <= MEMORY_ALLOCATION_SNAP) ? allocation.size + free_space.size : allocation.size;
+            free_space.size = (free_space.size <= MEMORY_ALLOCATION_SNAP) ? 0 : free_space.size;
             // if free space disappears
             if(free_space.size == 0) {
                 free_space_count--;
@@ -291,7 +293,7 @@ u32 vramAllocateBuffers(u32 buffer_count, const VkMemoryRequirements* buffer_req
     return vramAllocate(allocation_size, block_id, alloc_id);
 }
 
-u32 vramFreeAllocation(u32 block_id, u32 alloc_id) {
+u32 vramFree(u32 block_id, u32 alloc_id) {
     VramAllocation allocation = VRAM_ALLOCATION(s_vram_allocations, block_id, alloc_id);
     if(!(allocation.size || allocation.offset)) {
         return VRAM_FREE_ALREADY_EMPTY;
@@ -319,6 +321,9 @@ u32 vramFreeAllocation(u32 block_id, u32 alloc_id) {
     if(space_id >= MEMORY_BLOCK_MAX_ALLOCATIONS) {
         return VRAM_FREE_TO_MANY_FREE_BLOCKS;
     }
+    left_exists = left_id != U32_MAX;
+    right_exists = right_id != U32_MAX;
+    
     block_free_space_count += !(right_exists || left_exists) - (right_exists && left_exists); // keep in mind that its a copy of count
     space_id += - (right_exists && (space_id != right_id)) - left_exists;
     for(u32 i = 0; i < block_free_space_count; i++) {

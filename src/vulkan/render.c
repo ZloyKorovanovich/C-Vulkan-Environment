@@ -1,5 +1,5 @@
 
-#define INCLUDE_VULKAN_INTERNALS
+#define INCLUDE_VULKAN_INTERNAL
 #include "vulkan.h"
 #include "shaders.h"
 
@@ -71,24 +71,25 @@
                                                             REBECCA
 */
 
-extern const VulkanContext* getVulkanContextPtr(void);
-extern const SwapchainContext* getSwapchainContextPtr(void);
-extern const QueueContext* getQueueContextPtr(void);
-extern const ExtContext* getExtensionContextPtr(void);
 
 extern b32 recreateSwapchain(void);
  
-
 #define PIPELINE_COUNT 1
 #define PIPELINE_TRIANGLE_ID 0
 
-static u32 s_shader_module_count = 0;
-static VkShaderModule* s_shader_modules = NULL;
-
-static u32 c_pipeline_count = PIPELINE_COUNT;
 static void* s_pipeline_buffer = NULL; 
 static VkPipeline* s_pipelines = NULL;
 static VkPipelineLayout* s_pipeline_layouts = NULL;
+
+static VkDescriptorPool s_descriptor_pool = NULL;
+
+static void* s_descriptor_buffer = NULL;
+static VkDescriptorSetLayout* s_descriptor_layout_sets = NULL;
+static VkDescriptorSet* s_descriptor_sets = NULL;
+static u32 s_descriptor_layout_set_count = 0;
+
+static u32 s_shader_module_count = 0;
+static VkShaderModule* s_shader_modules = NULL;
 
 static EventCallback s_event_callback = NULL;
 
@@ -227,6 +228,45 @@ b32 createTrianglePipeline(VkDevice device, const VkShaderModule* shader_modules
     ERROR_CATCH(vkCreateGraphicsPipelines(device, NULL, 1, &pipeline_info, NULL, pipeline) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_TRIANGLE_PIPELINE_CREATE)
     }
+//_sucess:
+    return TRUE;
+_fail:
+    return FALSE;
+}
+
+// ===================================================== DESCRIPTORS
+// =================================================================
+
+b32 createDescriptorSets(VkDevice device, VkDescriptorPool pool, VkDescriptorSet* const descriptor_set, VkDescriptorSetLayout* const layout_set) {
+    VkDescriptorSetLayoutCreateInfo layout_set_info = (VkDescriptorSetLayoutCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = (VkDescriptorSetLayoutBinding[]) {
+            (VkDescriptorSetLayoutBinding) {
+                .binding = 0,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS
+            }
+        }
+    };
+    ERROR_CATCH(vkCreateDescriptorSetLayout(device, &layout_set_info, NULL, layout_set) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_CREATE_DESCRIPTOR_SET_LAYOUT)
+    }
+
+    VkDescriptorSetAllocateInfo allocate_info = (VkDescriptorSetAllocateInfo) {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = layout_set
+    };
+
+    ERROR_CATCH(vkAllocateDescriptorSets(device, &allocate_info, descriptor_set) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_ALLOCATE_DISCRIPTOR_SET)
+    }
+    
+//_sucess:
+    return TRUE;
 _fail:
     return FALSE;
 }
@@ -403,7 +443,6 @@ b32 renderLoop(void) {
         }
     }
     vkDeviceWaitIdle(vulkan_context.device);
-
 //_sucess:
     func_result = TRUE;
     goto _dispose;
@@ -420,7 +459,36 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     VulkanContext vulkan_context = *getVulkanContextPtr();
     s_event_callback = event_callback ? event_callback : vulkan_context.callback;
     b32 func_result;
-    
+
+    VkDescriptorPoolCreateInfo descriptor_pool_info = (VkDescriptorPoolCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = DESCRIPTOR_SET_COUNT,
+        .poolSizeCount = 1,
+        .pPoolSizes = (VkDescriptorPoolSize[]) {
+            (VkDescriptorPoolSize) {
+                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = DESCRIPTOR_MAX_COUNT
+            }
+        }
+    };
+    ERROR_CATCH(vkCreateDescriptorPool(vulkan_context.device, &descriptor_pool_info, NULL, &s_descriptor_pool) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_DESCRIPTOR_POOL_CREATE)
+    }
+
+    // descriptor set creation
+    s_descriptor_buffer = malloc(sizeof(void*) * DESCRIPTOR_SET_COUNT * 2);
+    ERROR_CATCH(!s_descriptor_buffer) {
+        _INVOKE_CALLBACK(VK_ERR_DESCRIPTOR_BUFFER_ALLOCATE)
+    }
+
+    s_descriptor_layout_sets = s_descriptor_buffer;
+    s_descriptor_sets = (VkDescriptorSet*)((void**)s_descriptor_buffer + DESCRIPTOR_SET_COUNT);
+    s_descriptor_layout_set_count = 1;
+    ERROR_CATCH(!createDescriptorSets(vulkan_context.device, s_descriptor_pool, s_descriptor_sets, s_descriptor_layout_sets)) {
+        goto _fail;
+    }
+    printf("callback\n");
+
     // read shaders and create shader objects
     u32* shader_buffer = malloc(SHADER_BUFFER_SIZE);
     ERROR_CATCH(!shader_buffer) {
@@ -446,13 +514,15 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
     free(shader_buffer);
 
     // pipelines creation
-    s_pipeline_buffer = malloc(sizeof(void*) * c_pipeline_count * 2);
+    s_pipeline_buffer = malloc(sizeof(void*) * PIPELINE_COUNT * 2);
     ERROR_CATCH(!s_pipeline_buffer) {
         _INVOKE_CALLBACK(VK_ERR_PIPELINE_BUFFER_ALLOCATE)
     }
     s_pipeline_layouts = s_pipeline_buffer;
-    s_pipelines = (VkPipeline*)((void**)s_pipeline_buffer + c_pipeline_count);
-    createTrianglePipeline(vulkan_context.device, s_shader_modules, s_pipelines, s_pipeline_layouts);
+    s_pipelines = (VkPipeline*)((void**)s_pipeline_buffer + PIPELINE_COUNT);
+    ERROR_CATCH(!createTrianglePipeline(vulkan_context.device, s_shader_modules, s_pipelines, s_pipeline_layouts)) {
+        goto _fail;
+    }
 
     ERROR_CATCH(!renderLoop()) {
         _INVOKE_CALLBACK(VK_ERR_RENDER_LOOP_FAIL)
@@ -464,15 +534,26 @@ b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, cons
 _fail:
     func_result = FALSE;
 _end:
-    for(u32 i = 0; i < c_pipeline_count; i++) {
+    for(u32 i = 0; i < PIPELINE_COUNT; i++) {
         SAFE_DESTROY(s_pipelines[i], vkDestroyPipeline(vulkan_context.device, s_pipelines[i], NULL))
-    }
-    for(u32 i = 0; i < c_pipeline_count; i++) {
         SAFE_DESTROY(s_pipeline_layouts[i], vkDestroyPipelineLayout(vulkan_context.device, s_pipeline_layouts[i], NULL))
     }
-    for(u32 i = 0; i < s_shader_module_count; i++) {
+    SAFE_DESTROY(s_pipeline_buffer, free(s_pipeline_buffer));
+    s_pipeline_layouts = NULL;
+    s_pipelines = NULL;
+
+    for(u32 i = 0; i < SHADER_COUNT; i++) {
         SAFE_DESTROY(s_shader_modules[i], vkDestroyShaderModule(vulkan_context.device, s_shader_modules[i], NULL))
     }
     SAFE_DESTROY(s_shader_modules, free(s_shader_modules));
+
+    for(u32 i = 0; i < s_descriptor_layout_set_count; i++) {
+        SAFE_DESTROY(s_descriptor_layout_sets[i], vkDestroyDescriptorSetLayout(vulkan_context.device, s_descriptor_layout_sets[i], NULL));
+    }
+    SAFE_DESTROY(s_descriptor_buffer, free(s_descriptor_buffer));
+    s_descriptor_layout_sets = NULL;
+    s_descriptor_sets = NULL;
+    s_descriptor_layout_set_count = 0;
+    SAFE_DESTROY(s_descriptor_pool, vkDestroyDescriptorPool(vulkan_context.device, s_descriptor_pool, NULL));
     return func_result;
 }

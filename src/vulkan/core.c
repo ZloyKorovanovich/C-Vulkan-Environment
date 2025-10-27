@@ -1,4 +1,4 @@
-#define INCLUDE_VULKAN_INTERNALS
+#define INCLUDE_VULKAN_INTERNAL
 #include "vulkan.h"
 
 /*                                                                                                     
@@ -360,7 +360,7 @@ if(!pfn) {                                                                      
     _INVOKE_CALLBACK(VK_ERR_LOAD_EXT_PFN)                                       \
 }
 
-b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback) {
+b32 coreInit(u32 width, u32 height, u32 flags, EventCallback callback) {
     // necessary to do the work and handle VK_ERRs
     s_vulkan_context.callback = callback ? callback : &defaultCallback;
 
@@ -593,7 +593,7 @@ _fail:
     return FALSE;
 }
 
-void renderTerminate(void) {
+void coreTerminate(void) {
     for(u32 i = 0; i < c_queue_count; i++) {
         SAFE_DESTROY(s_queue_context.command_pools[i], vkDestroyCommandPool(s_vulkan_context.device, s_queue_context.command_pools[i], NULL))
     }
@@ -620,6 +620,9 @@ void renderTerminate(void) {
     glfwTerminate();
     s_vulkan_context.callback = NULL;
 }
+
+// ======================================================== INTERNAL
+// =================================================================
 
 // this function should be called when window is resized
 b32 recreateSwapchain(void) {
@@ -661,7 +664,7 @@ b32 recreateSwapchain(void) {
     }
 
     vkGetSwapchainImagesKHR(s_vulkan_context.device, s_swapchain_context.swapchain, &s_swapchain_context.image_count, NULL); 
-    // @(Mitro): might cause issues if s_swapchain_image_count too big, but it shouldn't pass first sapchain creation in renderInit
+    // @(Mitro): might cause issues if s_swapchain_image_count too big, but it shouldn't pass first sapchain creation in vulkanInit
     vkGetSwapchainImagesKHR(s_vulkan_context.device, s_swapchain_context.swapchain, &s_swapchain_context.image_count, s_swapchain_context.images);
     VkImageViewCreateInfo view_info = (VkImageViewCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -689,9 +692,6 @@ b32 recreateSwapchain(void) {
 _fail:
     return FALSE;
 }
-
-// ========================================================= CONTEXT
-// =================================================================
 
 const VulkanContext* getVulkanContextPtr(void) {
     return &s_vulkan_context;

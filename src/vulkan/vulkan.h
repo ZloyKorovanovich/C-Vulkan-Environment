@@ -3,17 +3,12 @@
 
 #include "../main.h"
 
-// ================================================ RENDER INTERFACE
+// ============================================== EXTERNAL INTERFACE
 // =================================================================
-
-b32 renderInit(u32 width, u32 height, u32 flags, EventCallback callback);
-b32 vramInit(EventCallback callback);
-b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path);
-void vramTerminate(void);
-void renderTerminate(void);
 
 typedef enum {
     VK_CODE_SUCESS = 0,
+
     VK_ERR_GLFW_INIT = 1,
     VK_ERR_WINDOW_CREATE,
     VK_ERR_DEBUG_LAYERS_NOT_PRESENT,
@@ -28,14 +23,19 @@ typedef enum {
     VK_ERR_SWAPCHAIN_CREATE,
     VK_ERR_SWAPCHAIN_TOO_MANY_IMAGES,
     VK_ERR_SWAPCHAIN_VIEW_CREATE,
-
     VK_ERR_COMMAND_POOL_CREATE,
+
+    VK_ERR_DESCRIPTOR_POOL_CREATE,
+    VK_ERR_DESCRIPTOR_BUFFER_ALLOCATE,
     VK_ERR_SHADER_BUFFER_ALLOCATE,
     VK_ERR_SHADER_BUFFER_LOAD,
     VK_ERR_SHADER_MODULE_ARRAY_ALLOCATE,
     VK_ERR_SHADER_MODULE_CREATE,
     VK_ERR_PIPELINE_BUFFER_ALLOCATE,
     VK_ERR_RENDER_LOOP_FAIL,
+
+    VK_ERR_CREATE_DESCRIPTOR_SET_LAYOUT,
+    VK_ERR_ALLOCATE_DISCRIPTOR_SET,
 
     VK_ERR_TRIANGLE_PIPELINE_LAYOUT_CREATE,
     VK_ERR_TRIANGLE_PIPELINE_CREATE,
@@ -52,14 +52,22 @@ typedef enum {
     VK_ERR_VRAM_NOT_SUITABLE_FOR_BUFFER
 } VulkanCodes;
 
-
 typedef enum {
-    VULKAN_FLAG_DEBUG = 0b0001,
-    VULKAN_FLAG_FULLSCREEN = 0b0010,
-    VULKAN_FLAG_RESIZABLE = 0b0100,
+    VULKAN_FLAG_DEBUG = BIT(0),
+    VULKAN_FLAG_FULLSCREEN = BIT(1),
+    VULKAN_FLAG_RESIZABLE = BIT(2),
 } VulkanFlags;
 
-#ifdef INCLUDE_VULKAN_INTERNALS
+b32 coreInit(u32 width, u32 height, u32 flags, EventCallback callback);
+void coreTerminate(void);
+b32 vramInit(EventCallback callback);
+void vramTerminate(void);
+
+b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path);
+
+// ============================================== INTERNAL INTERFACE
+// =================================================================
+#ifdef INCLUDE_VULKAN_INTERNAL
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -124,9 +132,18 @@ typedef struct {
 }
 
 #define MEMORY_BLOCK_MAX_ALLOCATIONS 32
+#define MEMORY_ALLOCATION_SNAP 256
 
 #define MEMORY_BLOCK_LOCAL_ID 0
 #define MEMORY_BLOCK_TRANSFER_ID 1
+
+#define DESCRIPTOR_MAX_COUNT 1024
+#define DESCRIPTOR_SET_COUNT 4
+
+#define DESCRIPTOR_SET_GLOBAL_ID 0
+#define DESCRIPTOR_SET_PASS_ID 1
+#define DESCRIPTOR_SET_MATERIAL_ID 2
+#define DESCRIPTOR_SET_OBJECT_ID 3
 
 // ========================================================= HELPERS
 // =================================================================
@@ -159,6 +176,7 @@ typedef struct {
     VkDevice device;
     VkPhysicalDevice physical_device;
     EventCallback callback;
+    VkSurfaceFormatKHR surface_format;
 } VulkanContext;
 
 typedef struct {
@@ -181,5 +199,17 @@ typedef struct {
     PFN_vkCmdEndRenderingKHR cmd_end_rendering;
 } ExtContext;
 
-#endif // INCLUDE INTERNALS
+const VulkanContext* getVulkanContextPtr(void);
+const SwapchainContext* getSwapchainContextPtr(void);
+const QueueContext* getQueueContextPtr(void);
+const ExtContext* getExtensionContextPtr(void);
+
+b32 recreateSwapchain(void);
+
+u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id);
+u32 vramAllocateBuffers(u32 buffer_count, const VkMemoryRequirements* buffer_requirements, u32 block_id, u32* const alloc_id);
+u32 vramFree(u32 block_id, u32 alloc_id);
+void vramDebugPrintLayout(void);
+
+#endif // INCLUDE_VULKAN_INTERNAL
 #endif
