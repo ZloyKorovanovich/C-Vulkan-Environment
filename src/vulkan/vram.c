@@ -206,18 +206,6 @@ void vramTerminate(void) {
     s_callback = NULL;
 }
 
-typedef enum {
-    VRAM_ALLOCATE_SUCESS = 0,
-    VRAM_ALLOCATE_WRONG_MEMORY_TYPE,
-    VRAM_ALLOCATE_TOO_MANY_ALLOCATIONS,
-    VRAM_ALLOCATE_ALLOCATION_BIGGER_THAN_BLOCK,
-    VRAM_ALLOCATE_FAILED_TO_FIND_FREE_SAPCE,
-
-    VRAM_FREE_SUCESS = 0,
-    VRAM_FREE_TO_MANY_FREE_BLOCKS,
-    VRAM_FREE_ALREADY_EMPTY
-} vramAllocateCodes;
-
 u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
     VramAllocation allocation = (VramAllocation){
         .size = size
@@ -281,16 +269,31 @@ u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
     return VRAM_ALLOCATE_FAILED_TO_FIND_FREE_SAPCE;
 }
 
-u32 vramAllocateBuffers(u32 buffer_count, const VkMemoryRequirements* buffer_requirements, u32 block_id, u32* const alloc_id) {
+u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id) {
     u64 allocation_size = 0;
     u32 type_id = s_vram_blocks[block_id].type_id;
+
+    VkDevice device = getVulkanContextPtr()->device;
+    VkMemoryRequirements* memory_requirements = alloca(sizeof(VkMemoryRequirements) * buffer_count);
     for(u32 i = 0; i < buffer_count; i++) {
-        ERROR_CATCH(!(BIT(type_id) & buffer_requirements[i].memoryTypeBits)) {
+        vkGetBufferMemoryRequirements(device, buffers[i], memory_requirements + i);
+        ERROR_CATCH(!(BIT(type_id) & memory_requirements[i].memoryTypeBits)) {
             return VRAM_ALLOCATE_WRONG_MEMORY_TYPE;
         }
-        allocation_size += buffer_requirements[i].size;
+        allocation_size += memory_requirements[i].size;
     }
-    return vramAllocate(allocation_size, block_id, alloc_id);
+    u32 result = vramAllocate(allocation_size, block_id, alloc_id);
+    ERROR_CATCH(result != VRAM_ALLOCATE_SUCESS) {
+        return result;
+    }
+    u64 offset = VRAM_ALLOCATION(s_vram_allocations, block_id, *alloc_id).offset;
+    for(u32 i = 0; i < buffer_count; i++) {
+        ERROR_CATCH(vkBindBufferMemory(device, buffers[i], s_vram_blocks[block_id].memory, offset) != VK_SUCCESS) {
+            return VRAM_ALLOCATE_BUFFER_BIND_FAILED;
+        }
+        offset += memory_requirements[i].size;
+    }
+    return VRAM_ALLOCATE_SUCESS;
 }
 
 u32 vramFree(u32 block_id, u32 alloc_id) {
@@ -335,6 +338,20 @@ u32 vramFree(u32 block_id, u32 alloc_id) {
     VRAM_ALLOCATION(s_vram_allocations, block_id, alloc_id) = (VramAllocation){0};
     VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id) = block_allocation_count;
     return VRAM_FREE_SUCESS;
+}
+
+b32 vramWriteToAllocation(u32 block_id, u32 alloc_id, VramWriteDscr* write_dscr) {
+    VramAllocation allocation = VRAM_ALLOCATION(s_vram_allocations, block_id, alloc_id);
+    VkDevice device = getVulkanContextPtr()->device;
+    VkDeviceMemory memory = s_vram_blocks[block_id].memory;
+    void* map_ptr;
+    allocation.offset += write_dscr->offset;
+    ERROR_CATCH(vkMapMemory(device, memory, allocation.offset , MIN(allocation.size, write_dscr->size), 0, &map_ptr) != VK_SUCCESS) {
+        return FALSE;
+    }
+    memcpy(map_ptr, write_dscr->src, write_dscr->size);
+    vkUnmapMemory(device, memory);
+    return TRUE;
 }
 
 void vramDebugPrintLayout(void) {

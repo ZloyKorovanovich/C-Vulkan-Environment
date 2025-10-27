@@ -45,6 +45,13 @@ typedef enum {
     VK_ERR_FENCE_CREATE,
     VK_ERR_QUEUE_SUBMIT,
 
+    VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_CREATE,
+    VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_CREATE,
+    VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_ALLOCATE,
+    VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE,
+    VK_ERR_GLOBAL_UNIFORM_BUFFER_WRITE,
+
+
     VK_ERR_VRAM_LAYOUT_FAIL,
     VK_ERR_VRAM_ALLOCATE,
     VK_ERR_VRAM_ALLOCATION_BUFFER_ALLOCATE,
@@ -134,8 +141,8 @@ typedef struct {
 #define MEMORY_BLOCK_MAX_ALLOCATIONS 32
 #define MEMORY_ALLOCATION_SNAP 256
 
-#define MEMORY_BLOCK_LOCAL_ID 0
-#define MEMORY_BLOCK_TRANSFER_ID 1
+#define MEMORY_BLOCK_DEVICE_ID 0
+#define MEMORY_BLOCK_HOST_ID 1
 
 #define DESCRIPTOR_MAX_COUNT 1024
 #define DESCRIPTOR_SET_COUNT 4
@@ -206,9 +213,29 @@ const ExtContext* getExtensionContextPtr(void);
 
 b32 recreateSwapchain(void);
 
+typedef enum {
+    VRAM_ALLOCATE_SUCESS = 0,
+    VRAM_ALLOCATE_WRONG_MEMORY_TYPE,
+    VRAM_ALLOCATE_TOO_MANY_ALLOCATIONS,
+    VRAM_ALLOCATE_ALLOCATION_BIGGER_THAN_BLOCK,
+    VRAM_ALLOCATE_FAILED_TO_FIND_FREE_SAPCE,
+    VRAM_ALLOCATE_BUFFER_BIND_FAILED,
+
+    VRAM_FREE_SUCESS = 0,
+    VRAM_FREE_TO_MANY_FREE_BLOCKS,
+    VRAM_FREE_ALREADY_EMPTY
+} VramAllocateCodes;
+
+typedef struct {
+    void* src;
+    u64 offset;
+    u64 size;
+} VramWriteDscr;
+
 u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id);
-u32 vramAllocateBuffers(u32 buffer_count, const VkMemoryRequirements* buffer_requirements, u32 block_id, u32* const alloc_id);
+u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id);
 u32 vramFree(u32 block_id, u32 alloc_id);
+b32 vramWriteToAllocation(u32 block_id, u32 alloc_id, VramWriteDscr* write_dscr);
 void vramDebugPrintLayout(void);
 
 #endif // INCLUDE_VULKAN_INTERNAL

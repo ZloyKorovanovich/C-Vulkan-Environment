@@ -23,14 +23,14 @@ const ShaderInfo c_shader_infos[] = {
 	(ShaderInfo) {
 		.stage = VK_SHADER_STAGE_VERTEX_BIT,
 		.code_offset = 384,
-		.code_size = 1076,
+		.code_size = 1472,
 	},
 };
 
 #define SHADER_ID_TRIANGLE_F 0
 #define SHADER_ID_TRIANGLE_V 1
 #define SHADER_COUNT 2
-#define SHADER_BUFFER_SIZE 1460LU
+#define SHADER_BUFFER_SIZE 1856LU
 
 #endif
 
