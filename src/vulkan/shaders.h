@@ -4,15 +4,16 @@
 #ifndef _SHADERS_INCLUDED
 #define _SHADERS_INCLUDED
 
+#define SHADER_ENTRY_VERTEX "vertexFunc"
+#define SHADER_ENTRY_FRAGMENT "fragmentFunc"
+#define SHADER_ENTRY_COMPUTE "computeFunc"
+
+#ifdef INCLUDE_SHADERS_INETERNAL
 typedef struct {
 	u64 code_offset;
 	u64 code_size;
 	u32 stage;
 } ShaderInfo;
-
-#define SHADER_ENTRY_VERTEX "vertexFunc"
-#define SHADER_ENTRY_FRAGMENT "fragmentFunc"
-#define SHADER_ENTRY_COMPUTE "computeFunc"
 
 const ShaderInfo c_shader_infos[] = {
 	(ShaderInfo) {
@@ -27,10 +28,11 @@ const ShaderInfo c_shader_infos[] = {
 	},
 };
 
-#define SHADER_ID_TRIANGLE_F 0
-#define SHADER_ID_TRIANGLE_V 1
 #define SHADER_COUNT 2
 #define SHADER_BUFFER_SIZE 1856LU
+#endif
+#define SHADER_ID_TRIANGLE_F 0
+#define SHADER_ID_TRIANGLE_V 1
 
 #endif
 

@@ -168,14 +168,15 @@ int main(int argc, char** argv) {
 
 
     fprintf(header,
+        "#define SHADER_ENTRY_VERTEX \"vertexFunc\"\n"
+        "#define SHADER_ENTRY_FRAGMENT \"fragmentFunc\"\n"
+        "#define SHADER_ENTRY_COMPUTE \"computeFunc\"\n\n"
+        "#ifdef INCLUDE_SHADERS_INETERNAL\n"
         "typedef struct {\n"
         "\tu64 code_offset;\n"
         "\tu64 code_size;\n"
         "\tu32 stage;\n"
         "} ShaderInfo;\n\n"
-        "#define SHADER_ENTRY_VERTEX \"vertexFunc\"\n"
-        "#define SHADER_ENTRY_FRAGMENT \"fragmentFunc\"\n"
-        "#define SHADER_ENTRY_COMPUTE \"computeFunc\"\n\n"
         "const ShaderInfo c_shader_infos[] = {\n"
     );
 
@@ -204,15 +205,16 @@ _loop:
     goto _loop;
 _end:
     fprintf(header, "};\n\n");
+    fprintf(header, 
+        "#define SHADER_COUNT %u\n"
+        "#define SHADER_BUFFER_SIZE %luLU\n"
+        "#endif\n",
+        files_processed, iterator
+    );
     for(u32 i = 0 ; i < files_processed; i++) {
         fprintf(header, "#define SHADER_ID_%s %u\n", shader_infos[i].name, i);
     }
-    fprintf(header, 
-        "#define SHADER_COUNT %u\n"
-        "#define SHADER_BUFFER_SIZE %luLU\n\n#endif\n\n", 
-        files_processed, iterator
-    );
-
+    fprintf(header, "\n#endif\n\n");
     free(read_buffer);
     fclose(resource);
     fclose(header);

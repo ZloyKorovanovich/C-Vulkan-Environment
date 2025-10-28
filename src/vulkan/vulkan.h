@@ -70,7 +70,12 @@ void coreTerminate(void);
 b32 vramInit(EventCallback callback);
 void vramTerminate(void);
 
-b32 renderRun(UpdateCallback update_callback, EventCallback event_callback, const char* shader_path);
+b32 resourcesInit(const char* res_path);
+void resourcesTerminate(void);
+
+b32 renderInit(EventCallback event_callback);
+void renderTerminate(void);
+b32 renderLoop(UpdateCallback update_callback) ;
 
 // ============================================== INTERNAL INTERFACE
 // =================================================================
@@ -88,6 +93,10 @@ typedef struct {
     u32 negative_flags;
 } MemoryBlockDscr;
 
+typedef struct {
+    
+} DescriptorSetDscr;
+
 #define DEVICE_QUEUE_COUNT 3
 #define DEVICE_QUEUE_FLAG_MASK (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT)
 #define DEVICE_QUEUE_FLAGS  {                                               \
@@ -96,7 +105,7 @@ typedef struct {
     VK_QUEUE_TRANSFER_BIT                                                   \
 }
 
-#define QUEUE_GENERAL_ID 0
+#define QUEUE_RENDER_ID 0
 #define QUEUE_COMPUTE_ID 1
 #define QUEUE_TRANSFER_ID 2
 
@@ -145,6 +154,28 @@ typedef struct {
 #define MEMORY_BLOCK_HOST_ID 1
 
 #define DESCRIPTOR_MAX_COUNT 1024
+
+#define GENERAL_QUEUE_DESCRIPTOR_POOL_SIZES {       \
+    (VkDescriptorPoolSize) {                        \
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  \
+        .descriptorCount = DESCRIPTOR_MAX_COUNT     \
+    }                                               \
+    (VkDescriptorPoolSize) {                        \
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  \
+        .descriptorCount = DESCRIPTOR_MAX_COUNT     \
+    }                                               \
+}
+#define COMPUTE_QUEUE_DESCRIPTOR_POOL_SIZES {       \
+    (VkDescriptorPoolSize) {                        \
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,  \
+        .descriptorCount = DESCRIPTOR_MAX_COUNT     \
+    }                                               \
+    (VkDescriptorPoolSize) {                        \
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,  \
+        .descriptorCount = DESCRIPTOR_MAX_COUNT     \
+    }                                               \
+}
+
 #define DESCRIPTOR_SET_COUNT 4
 
 #define DESCRIPTOR_SET_GLOBAL_ID 0
@@ -187,7 +218,6 @@ typedef struct {
 } VulkanContext;
 
 typedef struct {
-    VkCommandPool command_pools[DEVICE_QUEUE_COUNT];
     QueueLocator queue_locators[DEVICE_QUEUE_COUNT];
     VkQueue queues[DEVICE_QUEUE_COUNT];
 } QueueContext;
@@ -237,6 +267,12 @@ u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id,
 u32 vramFree(u32 block_id, u32 alloc_id);
 b32 vramWriteToAllocation(u32 block_id, u32 alloc_id, VramWriteDscr* write_dscr);
 void vramDebugPrintLayout(void);
+
+const VkShaderModule* getShaderModulesPtr(void);
+
+#ifdef INCLUDE_QUEUE_RENDER
+#define CURRENT_QUEUE_ID QUEUE_RENDER_ID
+#endif // defined(INCLUDE_QUEUE_GENERAL)
 
 #endif // INCLUDE_VULKAN_INTERNAL
 #endif

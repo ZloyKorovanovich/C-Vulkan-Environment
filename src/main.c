@@ -22,12 +22,16 @@ i32 main(i32 argc, char** argv) {
     strcpy(shader_path, argv[0]);
     upFolder(shader_path);
     upFolder(shader_path);
-    strcat(shader_path, "\\data\\shaders.res");
+    strcat(shader_path, "\\data");
     printf("path %s\n", shader_path);
 
     coreInit(800, 600, VULKAN_FLAG_DEBUG | VULKAN_FLAG_RESIZABLE, &debugCallback);
     vramInit(NULL);
-    renderRun(NULL, NULL, shader_path);
+    resourcesInit(shader_path);
+    renderInit(NULL);
+    renderLoop(NULL);
+    renderTerminate();
+    resourcesTerminate();
     vramTerminate();
     coreTerminate();
     return 0;

@@ -575,18 +575,6 @@ b32 coreInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         }
     }
 
-    // create command pools
-    VkCommandPoolCreateInfo pool_info = (VkCommandPoolCreateInfo) {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
-    };
-    for(u32 i = 0; i < c_queue_count; i++) {
-        pool_info.queueFamilyIndex = s_queue_context.queue_locators[i].family_id;
-        pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        ERROR_CATCH(vkCreateCommandPool(s_vulkan_context.device, &pool_info, NULL, s_queue_context.command_pools + i) != VK_SUCCESS) {
-            _INVOKE_CALLBACK(VK_ERR_COMMAND_POOL_CREATE)
-        }
-    }
-
 //_sucess:
     return TRUE;
 _fail:
@@ -594,9 +582,6 @@ _fail:
 }
 
 void coreTerminate(void) {
-    for(u32 i = 0; i < c_queue_count; i++) {
-        SAFE_DESTROY(s_queue_context.command_pools[i], vkDestroyCommandPool(s_vulkan_context.device, s_queue_context.command_pools[i], NULL))
-    }
     for(u32 i = 0; i < s_swapchain_context.image_count; i++) {
         SAFE_DESTROY(s_swapchain_context.views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_context.views[i], NULL))
     }
