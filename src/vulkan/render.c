@@ -75,8 +75,9 @@
 
 extern b32 recreateSwapchain(void);
  
-#define PIPELINE_COUNT 1
-#define PIPELINE_TRIANGLE_ID 0
+#define PIPELINE_COUNT 2
+#define PIPELINE_DISTRIBUTION_ID 0
+#define PIPELINE_TRIANGLE_ID 1
 
 static void* s_pipeline_buffer = NULL; 
 static VkPipeline* s_pipelines = NULL;
@@ -96,6 +97,40 @@ static EventCallback s_event_callback = NULL;
 
 // ================================================ RENDER PIPELINES
 // =================================================================
+
+b32 createDistributionPipeline(VkDevice device, const VkShaderModule* shader_modules, VkPipeline* const pipeline, VkPipelineLayout* const layout) {
+    VkPipelineLayoutCreateInfo layout_info = (VkPipelineLayoutCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .flags = 0,
+        .pPushConstantRanges = NULL,
+        .pushConstantRangeCount = 0,
+        .setLayoutCount = 1,
+        .pSetLayouts = s_descriptor_layout_sets
+    };
+    ERROR_CATCH(vkCreatePipelineLayout(device, &layout_info, NULL, layout) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_DISTRIBUTION_PIPELINE_LAYOUT_CREATE)
+    }
+
+    VkComputePipelineCreateInfo pipeline_info = (VkComputePipelineCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .basePipelineHandle = NULL,
+        .basePipelineIndex = -1,
+        .stage = (VkPipelineShaderStageCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pName = SHADER_ENTRY_COMPUTE,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = shader_modules[SHADER_ID_DISTRIBUTION_C]
+        },
+        .layout = *layout
+    };
+    ERROR_CATCH(vkCreateComputePipelines(device, NULL, 1, &pipeline_info, NULL, pipeline) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_DISTRIBUTION_PIPELINE_CREATE)
+    }
+//_sucess:
+    return TRUE;
+_fail:
+    return FALSE;
+}
 
 b32 createTrianglePipeline(VkDevice device, const VkShaderModule* shader_modules, VkPipeline* const pipeline, VkPipelineLayout* const layout) {
     VkPipelineLayoutCreateInfo layout_info = (VkPipelineLayoutCreateInfo) {
@@ -228,20 +263,26 @@ _fail:
 // ===================================================== DESCRIPTORS
 // =================================================================
 
-b32 createDescriptorSets(VkDevice device, VkDescriptorPool pool, VkDescriptorSet* const descriptor_set, VkDescriptorSetLayout* const layout_set) {
+b32 createDescriptorSets(VkDevice device, VkDescriptorPool pool, VkDescriptorSet* const descriptor_sets, VkDescriptorSetLayout* const layout_sets) {
     VkDescriptorSetLayoutCreateInfo layout_set_info = (VkDescriptorSetLayoutCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
+        .bindingCount = 2,
         .pBindings = (VkDescriptorSetLayoutBinding[]) {
             (VkDescriptorSetLayoutBinding) {
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS
+            },
+            (VkDescriptorSetLayoutBinding) {
+                .binding = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL
             }
         }
     };
-    ERROR_CATCH(vkCreateDescriptorSetLayout(device, &layout_set_info, NULL, layout_set) != VK_SUCCESS) {
+    ERROR_CATCH(vkCreateDescriptorSetLayout(device, &layout_set_info, NULL, layout_sets) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_CREATE_DESCRIPTOR_SET_LAYOUT)
     }
 
@@ -249,10 +290,9 @@ b32 createDescriptorSets(VkDevice device, VkDescriptorPool pool, VkDescriptorSet
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool = pool,
         .descriptorSetCount = 1,
-        .pSetLayouts = layout_set
+        .pSetLayouts = layout_sets
     };
-
-    ERROR_CATCH(vkAllocateDescriptorSets(device, &allocate_info, descriptor_set) != VK_SUCCESS) {
+    ERROR_CATCH(vkAllocateDescriptorSets(device, &allocate_info, descriptor_sets) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_ALLOCATE_DISCRIPTOR_SET)
     }
     
@@ -355,6 +395,7 @@ b32 renderLoop(UpdateCallback update_callback) {
     // buffer creation
     VkBuffer global_uniform_buffer_device;
     VkBuffer global_uniform_buffer_host;
+    VkBuffer position_buffer_device;
     VkBufferCreateInfo buffer_create_info = (VkBufferCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -377,19 +418,65 @@ b32 renderLoop(UpdateCallback update_callback) {
     ERROR_CATCH(vkCreateBuffer(vulkan_context.device, &buffer_create_info, NULL, &global_uniform_buffer_host) != VK_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_CREATE)
     }
-    u32 gubuffer_host_id, gubuffer_device_id;
+    buffer_create_info = (VkBufferCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = &queue_context.queue_locators[CURRENT_QUEUE_ID].family_id,
+        .size = sizeof(float) * 2 * 64,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+    ERROR_CATCH(vkCreateBuffer(vulkan_context.device, &buffer_create_info, NULL, &position_buffer_device) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_POSITION_BUFFER_HOST_CREATE)
+    }
+
+    u32 gubuffer_host_id, gubuffer_device_id, pbuffer_device_id;
     ERROR_CATCH(vramAllocateBuffers(1, &global_uniform_buffer_host, MEMORY_BLOCK_HOST_ID, &gubuffer_host_id) != VRAM_ALLOCATE_SUCESS) {
         _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_ALLOCATE)
     }
     ERROR_CATCH(vramAllocateBuffers(1, &global_uniform_buffer_device, MEMORY_BLOCK_DEVICE_ID, &gubuffer_device_id) != VRAM_ALLOCATE_SUCESS) {
         _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE)
     }
+    ERROR_CATCH(vramAllocateBuffers(1, &position_buffer_device, MEMORY_BLOCK_DEVICE_ID, &pbuffer_device_id) != VRAM_ALLOCATE_SUCESS) {
+        _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE)
+    }
 
-    VkDescriptorBufferInfo descriptor_buffer_info = (VkDescriptorBufferInfo) {
+    VkDescriptorBufferInfo descriptor_gubuffer_info = (VkDescriptorBufferInfo) {
         .buffer = global_uniform_buffer_device,
         .offset = 0,
         .range = sizeof(GlobalUniformBuffer)
     };
+    VkDescriptorBufferInfo descriptor_pbuffer_info = (VkDescriptorBufferInfo) {
+        .buffer = position_buffer_device,
+        .offset = 0,
+        .range = sizeof(float) * 2 * 64
+    };
+    // write descriptor set
+    VkWriteDescriptorSet descriptor_set_writes[] = {
+        (VkWriteDescriptorSet) {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = s_descriptor_sets[0],
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+            .pBufferInfo = &descriptor_gubuffer_info,
+            .pImageInfo = NULL,
+            .pTexelBufferView = NULL
+        },
+        (VkWriteDescriptorSet) {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = s_descriptor_sets[0],
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .pBufferInfo = &descriptor_pbuffer_info,
+            .pImageInfo = NULL,
+            .pTexelBufferView = NULL
+        }
+    };
+    vkUpdateDescriptorSets(vulkan_context.device, 2, descriptor_set_writes, 0, NULL);
 
     // render loop
     while(!glfwWindowShouldClose(vulkan_context.window)) {
@@ -424,19 +511,6 @@ b32 renderLoop(UpdateCallback update_callback) {
         ERROR_CATCH(!vramWriteToAllocation(MEMORY_BLOCK_HOST_ID, gubuffer_host_id, (VramWriteDscr[]){{.src = &gubuffer_struct, .size = sizeof(GlobalUniformBuffer)}})) {
             _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_WRITE)
         }
-        // write descriptor set
-        VkWriteDescriptorSet descriptor_set_write = (VkWriteDescriptorSet) {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = s_descriptor_sets[0],
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .pBufferInfo = &descriptor_buffer_info,
-            .pImageInfo = NULL,
-            .pTexelBufferView = NULL
-        };
-        vkUpdateDescriptorSets(vulkan_context.device, 1, &descriptor_set_write, 0, NULL);
         
         VkCommandBufferBeginInfo command_buffer_begin_info = (VkCommandBufferBeginInfo) {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -455,9 +529,21 @@ b32 renderLoop(UpdateCallback update_callback) {
         };
         vkCmdCopyBuffer(command_buffer, global_uniform_buffer_host, global_uniform_buffer_device, 1, &buffer_copy);
 
-
         vkCmdPipelineBarrier(
             command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
+            0, 0, NULL, 0, NULL, 0, NULL
+        );
+
+        // distribution pass
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, s_pipeline_layouts[PIPELINE_DISTRIBUTION_ID], 0, 1, s_descriptor_sets, 0, NULL);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipeline_layouts[PIPELINE_TRIANGLE_ID], 0, 1, s_descriptor_sets, 0, NULL);
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, s_pipelines[PIPELINE_DISTRIBUTION_ID]);
+        vkCmdDispatch(command_buffer, 1, 1, 1);
+        
+
+        vkCmdPipelineBarrier(
+            command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
             0, 0, NULL, 0, NULL, 0, NULL
         );
         vkCmdPipelineBarrier(
@@ -466,14 +552,12 @@ b32 renderLoop(UpdateCallback update_callback) {
         );
         color_attachment.imageView = getSwapchainContextPtr()->views[image_id];
         ext_context.cmd_begin_rendering(command_buffer, &vk_rendeirng_info);
-
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipeline_layouts[0], 0, 1, s_descriptor_sets, 0, NULL);
         
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipelines[0]);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipelines[PIPELINE_TRIANGLE_ID]);
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(command_buffer, 0, 1, &vk_rendeirng_info.renderArea);
 
-        vkCmdDraw(command_buffer, 3, 1, 0, 0);
+        vkCmdDraw(command_buffer, 3 * 64, 1, 0, 0);
         //... DRAW here
 
         ext_context.cmd_end_rendering(command_buffer);
@@ -522,6 +606,7 @@ _fail:
 _dispose:
     SAFE_DESTROY(global_uniform_buffer_device, vkDestroyBuffer(vulkan_context.device, global_uniform_buffer_device, NULL))
     SAFE_DESTROY(global_uniform_buffer_host, vkDestroyBuffer(vulkan_context.device, global_uniform_buffer_host, NULL))
+    SAFE_DESTROY(position_buffer_device, vkDestroyBuffer(vulkan_context.device, position_buffer_device, NULL))
 
     SAFE_DESTROY(image_available_semaphore, vkDestroySemaphore(vulkan_context.device, image_available_semaphore, NULL))
     SAFE_DESTROY(image_finished_semaphore, vkDestroySemaphore(vulkan_context.device, image_finished_semaphore, NULL))
@@ -582,7 +667,10 @@ b32 renderInit(EventCallback event_callback) {
     s_pipelines = (VkPipeline*)((void**)s_pipeline_buffer + PIPELINE_COUNT);
 
     const VkShaderModule* shader_modules = getShaderModulesPtr();
-    ERROR_CATCH(!createTrianglePipeline(vulkan_context.device, shader_modules, s_pipelines, s_pipeline_layouts)) {
+    ERROR_CATCH(!createTrianglePipeline(vulkan_context.device, shader_modules, s_pipelines + PIPELINE_TRIANGLE_ID, s_pipeline_layouts + PIPELINE_TRIANGLE_ID)) {
+        goto _fail;
+    }
+    ERROR_CATCH(!createDistributionPipeline(vulkan_context.device, shader_modules, s_pipelines + PIPELINE_DISTRIBUTION_ID, s_pipeline_layouts + PIPELINE_DISTRIBUTION_ID)) {
         goto _fail;
     }
 

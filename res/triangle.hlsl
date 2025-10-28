@@ -18,11 +18,14 @@ struct Interpolators {
 [[vk::binding(0, 0)]] cbuffer per_object {
     uniform float4 _screen_size;
 };
+[[vk::binding(1, 0)]] StructuredBuffer<float2> position_buffer;
 
 Interpolators vertexFunc(uint vertex_id : SV_VERTEXID) {
     Interpolators output = (Interpolators)0;
-    output.position_cs = float4(positions[vertex_id] * 512 / _screen_size.zw, 0, 1);
-    output.color = float4(colors[vertex_id], 1);
+    uint sample_id = vertex_id / 3;
+    uint local_id = vertex_id - sample_id * 3;
+    output.position_cs = float4((position_buffer[sample_id] + positions[local_id]) * 512 / _screen_size.zw, 0, 1);
+    output.color = float4(colors[local_id], 1);
     return output;
 }
 

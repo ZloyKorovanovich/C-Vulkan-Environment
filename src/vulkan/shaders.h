@@ -17,22 +17,28 @@ typedef struct {
 
 const ShaderInfo c_shader_infos[] = {
 	(ShaderInfo) {
-		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.stage = VK_SHADER_STAGE_COMPUTE_BIT,
 		.code_offset = 0,
+		.code_size = 732,
+	},
+	(ShaderInfo) {
+		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.code_offset = 732,
 		.code_size = 384,
 	},
 	(ShaderInfo) {
 		.stage = VK_SHADER_STAGE_VERTEX_BIT,
-		.code_offset = 384,
-		.code_size = 1472,
+		.code_offset = 1116,
+		.code_size = 1824,
 	},
 };
 
-#define SHADER_COUNT 2
-#define SHADER_BUFFER_SIZE 1856LU
+#define SHADER_COUNT 3
+#define SHADER_BUFFER_SIZE 2940LU
 #endif
-#define SHADER_ID_TRIANGLE_F 0
-#define SHADER_ID_TRIANGLE_V 1
+#define SHADER_ID_DISTRIBUTION_C 0
+#define SHADER_ID_TRIANGLE_F 1
+#define SHADER_ID_TRIANGLE_V 2
 
 #endif
 
