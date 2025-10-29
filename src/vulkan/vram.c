@@ -208,7 +208,7 @@ void vramTerminate(void) {
 
 u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
     VramAllocation allocation = (VramAllocation){
-        .size = size
+        .size = ALIGN(size, VRAM_ALLOCATION_ALIGMENT)
     };
     ERROR_CATCH(allocation.size > s_vram_blocks[block_id].size) {
         return VRAM_ALLOCATE_ALLOCATION_BIGGER_THAN_BLOCK;
@@ -296,6 +296,33 @@ u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id,
     return VRAM_ALLOCATE_SUCESS;
 }
 
+u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u32* const alloc_id) {
+    u64 allocation_size = 0;
+    u32 type_id = s_vram_blocks[block_id].type_id;
+
+    VkDevice device = getVulkanContextPtr()->device;
+    VkMemoryRequirements* memory_requirements = alloca(sizeof(VkMemoryRequirements) * image_count);
+    for(u32 i = 0; i < image_count; i++) {
+        vkGetImageMemoryRequirements(device, images[i], memory_requirements + i);
+        ERROR_CATCH(!(BIT(type_id) & memory_requirements[i].memoryTypeBits)) {
+            return VRAM_ALLOCATE_WRONG_MEMORY_TYPE;
+        }
+        allocation_size += memory_requirements[i].size;
+    }
+    u32 result = vramAllocate(allocation_size, block_id, alloc_id);
+    ERROR_CATCH(result != VRAM_ALLOCATE_SUCESS) {
+        return result;
+    }
+    u64 offset = VRAM_ALLOCATION(s_vram_allocations, block_id, *alloc_id).offset;
+    for(u32 i = 0; i < image_count; i++) {
+        ERROR_CATCH(vkBindImageMemory(device, images[i], s_vram_blocks[block_id].memory, offset) != VK_SUCCESS) {
+            return VRAM_ALLOCATE_BUFFER_BIND_FAILED;
+        }
+        offset += memory_requirements[i].size;
+    }
+    return VRAM_ALLOCATE_SUCESS;
+}
+
 u32 vramFree(u32 block_id, u32 alloc_id) {
     VramAllocation allocation = VRAM_ALLOCATION(s_vram_allocations, block_id, alloc_id);
     if(!(allocation.size || allocation.offset)) {
@@ -352,6 +379,15 @@ b32 vramWriteToAllocation(u32 block_id, u32 alloc_id, VramWriteDscr* write_dscr)
     memcpy(map_ptr, write_dscr->src, write_dscr->size);
     vkUnmapMemory(device, memory);
     return TRUE;
+}
+
+void vramGetMemoryDscr(u32 block_id, u32 alloc_id, VramMemoryDscr* const memory_dscr) {
+    VramAllocation allocation = VRAM_ALLOCATION(s_vram_allocations, block_id, alloc_id);
+    *memory_dscr = (VramMemoryDscr) {
+        .memory = s_vram_blocks[block_id].memory,
+        .offset = allocation.offset,
+        .size = allocation.size
+    };
 }
 
 void vramDebugPrintLayout(void) {

@@ -25,6 +25,10 @@ typedef enum {
     VK_ERR_SWAPCHAIN_VIEW_CREATE,
     VK_ERR_COMMAND_POOL_CREATE,
 
+    VK_ERR_FAILED_TO_CREATE_DEPTH_IMAGE,
+    VK_ERR_FAILED_TO_ALLOCATE_DEPTH_IMAGE,
+    VK_ERR_FAILED_TO_CREATE_DEPTH_IMAGE_VIEW,
+    
     VK_ERR_DESCRIPTOR_POOL_CREATE,
     VK_ERR_DESCRIPTOR_BUFFER_ALLOCATE,
     VK_ERR_SHADER_BUFFER_ALLOCATE,
@@ -93,6 +97,7 @@ b32 renderLoop(UpdateCallback update_callback) ;
 
 typedef struct {
     u64 size;
+    u64 aligment;
     u32 positive_flags;
     u32 negative_flags;
 } MemoryBlockDscr;
@@ -140,17 +145,17 @@ typedef struct {
 #define MEMORY_BLOCK_COUNT 2
 #define MEMORY_BLOCK_DESCRIPTORS {                              \
     (MemoryBlockDscr) {                                         \
-        .size = 1024 * 1024 * 4,                                \
+        .size = 1024 * 1024 * 32,                               \
         .positive_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,  \
         .negative_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT   \
     },                                                          \
     (MemoryBlockDscr) {                                         \
-        .size = 1024 * 1024 * 4,                                \
+        .size = 1024 * 1024 * 16,                               \
         .positive_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,  \
         .negative_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT   \
     }                                                           \
 }
-
+#define VRAM_ALLOCATION_ALIGMENT 1024
 #define MEMORY_BLOCK_MAX_ALLOCATIONS 32
 #define MEMORY_ALLOCATION_SNAP 256
 
@@ -266,10 +271,18 @@ typedef struct {
     u64 size;
 } VramWriteDscr;
 
+typedef struct {
+    VkDeviceMemory memory;
+    u64 offset;
+    u64 size;
+} VramMemoryDscr;
+
 u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id);
 u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id);
+u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u32* const alloc_id);
 u32 vramFree(u32 block_id, u32 alloc_id);
 b32 vramWriteToAllocation(u32 block_id, u32 alloc_id, VramWriteDscr* write_dscr);
+void vramGetMemoryDscr(u32 block_id, u32 alloc_id, VramMemoryDscr* const memory_dscr);
 void vramDebugPrintLayout(void);
 
 const VkShaderModule* getShaderModulesPtr(void);

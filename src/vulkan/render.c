@@ -72,9 +72,13 @@
                                                             REBECCA
 */
 
+typedef struct {
+    VkImage image;
+    VkImageView view;
+    VkFormat format;
+    u32 allocation_id;
+} DepthBuffer;
 
-extern b32 recreateSwapchain(void);
- 
 #define PIPELINE_COUNT 2
 #define PIPELINE_DISTRIBUTION_ID 0
 #define PIPELINE_TRIANGLE_ID 1
@@ -91,9 +95,74 @@ static VkDescriptorSetLayout* s_descriptor_layout_sets = NULL;
 static VkDescriptorSet* s_descriptor_sets = NULL;
 static u32 s_descriptor_layout_set_count = 0;
 
+static DepthBuffer s_depth_buffer = (DepthBuffer){0};
+
 static EventCallback s_event_callback = NULL;
 
 #define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_event_callback, code, _fail)
+
+typedef struct {
+    float viewport_params[4];
+} GlobalUniformBuffer;
+
+// ================================================== SCREEN BUFFERS
+// =================================================================
+
+b32 createDepthBuffer(VkDevice device) {
+    VkExtent2D screen_extent = getSwapchainContextPtr()->descriptor.extent;
+    s_depth_buffer.format = VK_FORMAT_D16_UNORM;
+    VkImageCreateInfo image_info = (VkImageCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .extent = (VkExtent3D){
+            .width = screen_extent.width, 
+            .height = screen_extent.height, 
+            .depth = 1
+        },
+        .format = s_depth_buffer.format,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = 1,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+    ERROR_CATCH(vkCreateImage(device, &image_info, NULL, &s_depth_buffer.image) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_FAILED_TO_CREATE_DEPTH_IMAGE)
+    }
+    VkImageViewCreateInfo image_view_info = (VkImageViewCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .image = s_depth_buffer.image,
+        .format = s_depth_buffer.format,
+        .subresourceRange = (VkImageSubresourceRange) {
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT
+        }
+    };
+    ERROR_CATCH(vramAllocateImages(1, &s_depth_buffer.image, MEMORY_BLOCK_DEVICE_ID, &s_depth_buffer.allocation_id) != VRAM_ALLOCATE_SUCESS) {
+        _INVOKE_CALLBACK(VK_ERR_FAILED_TO_ALLOCATE_DEPTH_IMAGE)
+    }
+    ERROR_CATCH(vkCreateImageView(device, &image_view_info, NULL, &s_depth_buffer.view) != VK_SUCCESS) {
+        _INVOKE_CALLBACK(VK_ERR_FAILED_TO_CREATE_DEPTH_IMAGE_VIEW)
+    }
+//_success:
+    return TRUE;
+_fail:
+    return FALSE;
+}
+
+void destroyDepthBuffer(VkDevice device) {
+    vkDestroyImageView(device, s_depth_buffer.view, NULL);
+    vkDestroyImage(device, s_depth_buffer.image, NULL);
+    vramDebugPrintLayout();
+    vramFree(MEMORY_BLOCK_DEVICE_ID, s_depth_buffer.allocation_id);
+    vramDebugPrintLayout();
+    s_depth_buffer = (DepthBuffer){0};
+}
 
 // ================================================ RENDER PIPELINES
 // =================================================================
@@ -305,10 +374,6 @@ _fail:
 // ================================================ RENDER INTERFACE
 // =================================================================
 
-typedef struct {
-    float viewport_params[4];
-} GlobalUniformBuffer;
-
 b32 renderLoop(UpdateCallback update_callback) {
     VulkanContext vulkan_context = *getVulkanContextPtr();
     QueueContext queue_context = *getQueueContextPtr();
@@ -430,14 +495,11 @@ b32 renderLoop(UpdateCallback update_callback) {
         _INVOKE_CALLBACK(VK_ERR_POSITION_BUFFER_HOST_CREATE)
     }
 
-    u32 gubuffer_host_id, gubuffer_device_id, pbuffer_device_id;
+    u32 gubuffer_host_id, buffers_device_id;
     ERROR_CATCH(vramAllocateBuffers(1, &global_uniform_buffer_host, MEMORY_BLOCK_HOST_ID, &gubuffer_host_id) != VRAM_ALLOCATE_SUCESS) {
         _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_ALLOCATE)
     }
-    ERROR_CATCH(vramAllocateBuffers(1, &global_uniform_buffer_device, MEMORY_BLOCK_DEVICE_ID, &gubuffer_device_id) != VRAM_ALLOCATE_SUCESS) {
-        _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE)
-    }
-    ERROR_CATCH(vramAllocateBuffers(1, &position_buffer_device, MEMORY_BLOCK_DEVICE_ID, &pbuffer_device_id) != VRAM_ALLOCATE_SUCESS) {
+    ERROR_CATCH(vramAllocateBuffers(2, (VkBuffer[]){global_uniform_buffer_device, position_buffer_device}, MEMORY_BLOCK_DEVICE_ID, &buffers_device_id) != VRAM_ALLOCATE_SUCESS) {
         _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE)
     }
 
@@ -486,6 +548,8 @@ b32 renderLoop(UpdateCallback update_callback) {
         if(image_acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
             vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();
+            destroyDepthBuffer(vulkan_context.device);
+            createDepthBuffer(vulkan_context.device);
             continue;
         }
 
@@ -594,6 +658,8 @@ b32 renderLoop(UpdateCallback update_callback) {
         if(present_result == VK_ERROR_OUT_OF_DATE_KHR) {
             vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();
+            destroyDepthBuffer(vulkan_context.device);
+            createDepthBuffer(vulkan_context.device);
             continue;
         }
     }
@@ -657,7 +723,11 @@ b32 renderInit(EventCallback event_callback) {
         goto _fail;
     }
     
-    
+    // depth buffer
+    ERROR_CATCH(!createDepthBuffer(vulkan_context.device)) {
+        goto _fail;
+    }
+
     // pipelines creation
     s_pipeline_buffer = malloc(sizeof(void*) * PIPELINE_COUNT * 2);
     ERROR_CATCH(!s_pipeline_buffer) {
@@ -690,6 +760,8 @@ void renderTerminate(void) {
     SAFE_DESTROY(s_pipeline_buffer, free(s_pipeline_buffer))
     s_pipeline_layouts = NULL;
     s_pipelines = NULL;
+
+    destroyDepthBuffer(vulkan_context.device);
 
     for(u32 i = 0; i < s_descriptor_layout_set_count; i++) {
         SAFE_DESTROY(s_descriptor_layout_sets[i], vkDestroyDescriptorSetLayout(vulkan_context.device, s_descriptor_layout_sets[i], NULL))
