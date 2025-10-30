@@ -86,9 +86,9 @@ const VkDebugUtilsMessageTypeFlagBitsEXT c_debug_message_type = (
     VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
 );
 
-const u32 c_vulkan_extension_count = 1;
-const u32 c_vulkan_extension_count_debug = 2;
-const char* c_vulkan_extensions[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME};
+const u32 c_vulkan_extension_count = INSTANCE_EXTENSION_COUNT;
+const u32 c_vulkan_extension_count_debug = INSTANCE_EXTENSION_DEBUG_COUNT;
+const char* c_vulkan_extensions[] = INSTANCE_EXTENSIONS;
 
 const u32 c_queue_count = DEVICE_QUEUE_COUNT;
 const u32 c_queue_flags[] = DEVICE_QUEUE_FLAGS;

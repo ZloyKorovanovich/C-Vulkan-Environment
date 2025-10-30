@@ -102,9 +102,11 @@ typedef struct {
     u32 negative_flags;
 } MemoryBlockDscr;
 
-typedef struct {
-    
-} DescriptorSetDscr;
+
+#define INSTANCE_EXTENSION_COUNT 0
+#define INSTANCE_EXTENSION_DEBUG_COUNT 2
+#define INSTANCE_EXTENSIONS {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, VK_EXT_DEBUG_UTILS_EXTENSION_NAME}
+
 
 #define DEVICE_QUEUE_COUNT 3
 #define DEVICE_QUEUE_FLAG_MASK (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT)
@@ -223,7 +225,6 @@ typedef struct {
     VkDevice device;
     VkPhysicalDevice physical_device;
     EventCallback callback;
-    VkSurfaceFormatKHR surface_format;
 } VulkanContext;
 
 typedef struct {

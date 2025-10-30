@@ -288,10 +288,17 @@ b32 createTrianglePipeline(VkDevice device, const VkShaderModule* shader_modules
         .blendConstants[2] = 0.0f,
         .blendConstants[3] = 0.0f
     };
+    VkPipelineDepthStencilStateCreateInfo depth_stencil_state = (VkPipelineDepthStencilStateCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = TRUE,
+        .depthWriteEnable = TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL
+    };
     VkPipelineRenderingCreateInfoKHR rendering_create_info = (VkPipelineRenderingCreateInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
         .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &getSwapchainContextPtr()->descriptor.color_format.format
+        .pColorAttachmentFormats = &getSwapchainContextPtr()->descriptor.color_format.format,
+        .depthAttachmentFormat = s_depth_buffer.format
     };
 
     VkPipelineViewportStateCreateInfo viewport_state = (VkPipelineViewportStateCreateInfo) {
@@ -311,7 +318,7 @@ b32 createTrianglePipeline(VkDevice device, const VkShaderModule* shader_modules
         .pViewportState = &viewport_state,
         .pRasterizationState = &rasterization_state,
         .pMultisampleState = &multisample_state,
-        .pDepthStencilState = NULL,
+        .pDepthStencilState = &depth_stencil_state,
         .pColorBlendState = &color_blend_state,
         .pDynamicState = &dynamic_state,
         .layout = *layout,
@@ -412,9 +419,16 @@ b32 renderLoop(UpdateCallback update_callback) {
 
     VkRenderingAttachmentInfoKHR color_attachment = (VkRenderingAttachmentInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+    };
+    VkRenderingAttachmentInfoKHR depth_attachment = (VkRenderingAttachmentInfoKHR) {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
         .clearValue = (VkClearValue) {
-            .color = (VkClearColorValue){0},
-            .depthStencil = (VkClearDepthStencilValue){0}
+            .depthStencil = (VkClearDepthStencilValue){
+                .depth = 1.0
+            }
         },
         .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -424,7 +438,8 @@ b32 renderLoop(UpdateCallback update_callback) {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color_attachment,
-        .layerCount = 1
+        .layerCount = 1,
+        .pDepthAttachment = &depth_attachment
     };
     VkImageMemoryBarrier image_memory_top_barrier = (VkImageMemoryBarrier) {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -487,7 +502,7 @@ b32 renderLoop(UpdateCallback update_callback) {
         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         .queueFamilyIndexCount = 1,
         .pQueueFamilyIndices = &queue_context.queue_locators[CURRENT_QUEUE_ID].family_id,
-        .size = sizeof(float) * 2 * 64,
+        .size = sizeof(float) * 4 * 64,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE
     };
     ERROR_CATCH(vkCreateBuffer(vulkan_context.device, &buffer_create_info, NULL, &position_buffer_device) != VK_SUCCESS) {
@@ -510,7 +525,7 @@ b32 renderLoop(UpdateCallback update_callback) {
     VkDescriptorBufferInfo descriptor_pbuffer_info = (VkDescriptorBufferInfo) {
         .buffer = position_buffer_device,
         .offset = 0,
-        .range = sizeof(float) * 2 * 64
+        .range = sizeof(float) * 4 * 64
     };
     // write descriptor set
     VkWriteDescriptorSet descriptor_set_writes[] = {
@@ -538,6 +553,14 @@ b32 renderLoop(UpdateCallback update_callback) {
         }
     };
     vkUpdateDescriptorSets(vulkan_context.device, 2, descriptor_set_writes, 0, NULL);
+
+    VkBufferMemoryBarrier position_buffer_barrier = (VkBufferMemoryBarrier) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .buffer = position_buffer_device,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .size = sizeof(float) * 3 * 64,
+        .srcQueueFamilyIndex = queue_context.queue_locators[CURRENT_QUEUE_ID].family_id
+    };
 
     // render loop
     while(!glfwWindowShouldClose(vulkan_context.window)) {
@@ -607,13 +630,15 @@ b32 renderLoop(UpdateCallback update_callback) {
 
         vkCmdPipelineBarrier(
             command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
-            0, 0, NULL, 0, NULL, 0, NULL
+            0, 0, NULL, 1, &position_buffer_barrier, 0, NULL
         );
         vkCmdPipelineBarrier(
             command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
             0, 0, NULL, 0, NULL, 1, &image_memory_top_barrier
         );
         color_attachment.imageView = getSwapchainContextPtr()->views[image_id];
+        depth_attachment.imageView = s_depth_buffer.view;
+
         ext_context.cmd_begin_rendering(command_buffer, &vk_rendeirng_info);
         
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipelines[PIPELINE_TRIANGLE_ID]);
