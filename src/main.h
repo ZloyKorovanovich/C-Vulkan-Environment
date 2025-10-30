@@ -99,7 +99,7 @@ typedef b32 (*EventCallback) (u32 event_code);
 
 #define ERROR_CATCH(exp) if(EXPECT_F(exp))
 
-#define ALIGN(ptr, aligment) (ptr += (aligment - ptr % aligment))
+#define ALIGN(ptr, aligment) (ptr + (aligment - ptr % aligment) * (ptr % aligment != 0))
 
 // ========================================================= MODULES
 // =================================================================

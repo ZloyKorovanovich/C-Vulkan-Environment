@@ -143,7 +143,8 @@ b32 createDepthBuffer(VkDevice device) {
             .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT
         }
     };
-    ERROR_CATCH(vramAllocateImages(1, &s_depth_buffer.image, MEMORY_BLOCK_DEVICE_ID, &s_depth_buffer.allocation_id) != VRAM_ALLOCATE_SUCESS) {
+
+    ERROR_CATCH(vramAllocateImages(1, &s_depth_buffer.image, MEMORY_BLOCK_DEVICE_ID, &s_depth_buffer.allocation_id) != VRAM_ALLOCATE_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_FAILED_TO_ALLOCATE_DEPTH_IMAGE)
     }
     ERROR_CATCH(vkCreateImageView(device, &image_view_info, NULL, &s_depth_buffer.view) != VK_SUCCESS) {
@@ -158,9 +159,7 @@ _fail:
 void destroyDepthBuffer(VkDevice device) {
     vkDestroyImageView(device, s_depth_buffer.view, NULL);
     vkDestroyImage(device, s_depth_buffer.image, NULL);
-    vramDebugPrintLayout();
     vramFree(MEMORY_BLOCK_DEVICE_ID, s_depth_buffer.allocation_id);
-    vramDebugPrintLayout();
     s_depth_buffer = (DepthBuffer){0};
 }
 
@@ -496,10 +495,10 @@ b32 renderLoop(UpdateCallback update_callback) {
     }
 
     u32 gubuffer_host_id, buffers_device_id;
-    ERROR_CATCH(vramAllocateBuffers(1, &global_uniform_buffer_host, MEMORY_BLOCK_HOST_ID, &gubuffer_host_id) != VRAM_ALLOCATE_SUCESS) {
+    ERROR_CATCH(vramAllocateBuffers(1, &global_uniform_buffer_host, MEMORY_BLOCK_HOST_ID, &gubuffer_host_id) != VRAM_ALLOCATE_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_ALLOCATE)
     }
-    ERROR_CATCH(vramAllocateBuffers(2, (VkBuffer[]){global_uniform_buffer_device, position_buffer_device}, MEMORY_BLOCK_DEVICE_ID, &buffers_device_id) != VRAM_ALLOCATE_SUCESS) {
+    ERROR_CATCH(vramAllocateBuffers(2, (VkBuffer[]){global_uniform_buffer_device, position_buffer_device}, MEMORY_BLOCK_DEVICE_ID, &buffers_device_id) != VRAM_ALLOCATE_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE)
     }
 

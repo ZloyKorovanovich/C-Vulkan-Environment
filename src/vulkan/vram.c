@@ -206,67 +206,73 @@ void vramTerminate(void) {
     s_callback = NULL;
 }
 
-u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id) {
-    VramAllocation allocation = (VramAllocation){
-        .size = ALIGN(size, VRAM_ALLOCATION_ALIGMENT)
-    };
-    ERROR_CATCH(allocation.size > s_vram_blocks[block_id].size) {
+u32 vramAllocate(u64 size, u64 aligment, u32 block_id, u32* alloc_id) {
+    ERROR_CATCH(size > s_vram_blocks[block_id].size) {
         return VRAM_ALLOCATE_ALLOCATION_BIGGER_THAN_BLOCK;
     }
-
     u32 allocation_count = VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id);
     ERROR_CATCH(allocation_count == MEMORY_BLOCK_MAX_ALLOCATIONS) {
         return VRAM_ALLOCATE_TOO_MANY_ALLOCATIONS;
     }
-
-    // search for suitable space
     u32 free_space_count = VRAM_ALLOCATION_COUNT(s_vram_free_space_counts, block_id);
-    for(u32 i = 0; i < free_space_count; i++) {
-        VramAllocation free_space = VRAM_ALLOCATION(s_vram_free_spaces, block_id, i); 
-        if(free_space.size >= allocation.size) {
-            // found suitable space
-            allocation.offset = free_space.offset;
-            free_space.offset += allocation.size;
-            free_space.size = free_space.size - allocation.size;
-            allocation.size = (free_space.size <= MEMORY_ALLOCATION_SNAP) ? allocation.size + free_space.size : allocation.size;
-            free_space.size = (free_space.size <= MEMORY_ALLOCATION_SNAP) ? 0 : free_space.size;
-            // if free space disappears
-            if(free_space.size == 0) {
-                free_space_count--;
-                for(u32 j = i; j < free_space_count; j++) {
-                    VRAM_ALLOCATION(s_vram_free_spaces, block_id, j) = VRAM_ALLOCATION(s_vram_free_spaces, block_id, j + 1);
-                }
-            }
-            // this keeps free space ordered from smallest to biggest
-            u32 free_space_insert_id = i;
-            for(u32 j = 0; j < i; j++) {
-                if(VRAM_ALLOCATION(s_vram_free_spaces, block_id, j).size > free_space.size) {
-                    // displace and put value to j
-                    free_space_count++;
-                    free_space_insert_id = j;
-                    for(u32 k = j + 1; k < free_space_count; k++) {
-                        VRAM_ALLOCATION(s_vram_free_spaces, block_id, k) = VRAM_ALLOCATION(s_vram_free_spaces, block_id, k - 1);
-                    }
-                    break;
-                }
-            }
-
-            VRAM_ALLOCATION(s_vram_free_spaces, block_id, free_space_insert_id) = free_space;
-            VRAM_ALLOCATION_COUNT(s_vram_free_space_counts, block_id) = free_space_count;
-            allocation_count = VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id);
-            for(u32 j = 0; j < MEMORY_BLOCK_MAX_ALLOCATIONS; j++) {
-                VramAllocation alloc_slot = VRAM_ALLOCATION(s_vram_allocations, block_id, j);
-                if(!(alloc_slot.offset || alloc_slot.size)) {
-                    VRAM_ALLOCATION(s_vram_allocations, block_id, j) = allocation;
-                    *alloc_id = j;
-                    break;
-                }
-            }
-            VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id) = allocation_count + 1;
-            return VRAM_ALLOCATE_SUCESS;
+    u32 space_id;
+    VramAllocation unaligned_space, aligned_space;
+    for(space_id = 0; space_id < free_space_count; space_id++) {
+        unaligned_space = VRAM_ALLOCATION(s_vram_free_spaces, block_id, space_id);
+        aligned_space.offset = ALIGN(unaligned_space.offset, aligment);
+        aligned_space.size = unaligned_space.size + unaligned_space.offset - aligned_space.offset;
+        if(aligned_space.offset < unaligned_space.offset + unaligned_space.size && aligned_space.size >= size) {
+            goto _found_block;
         }
     }
     return VRAM_ALLOCATE_FAILED_TO_FIND_FREE_SAPCE;
+
+_found_block:
+    size = (aligned_space.size <= size + MEMORY_ALLOCATION_SNAP) ? aligned_space.size : size;
+    VramAllocation allocation = (VramAllocation) {
+        .offset = aligned_space.offset,
+        .size = size
+    };
+    unaligned_space.size -= aligned_space.size;
+    aligned_space.offset += size;
+    aligned_space.size -= size;
+
+    if(aligned_space.size == 0) {
+        free_space_count--;
+        VRAM_ALLOCATION_COUNT(s_vram_free_space_counts, block_id) = free_space_count;
+        for(u32 i = 0; i < free_space_count; i++) {
+            VRAM_ALLOCATION(s_vram_free_spaces, block_id, i) = VRAM_ALLOCATION(s_vram_free_spaces, block_id, i + (i >= space_id));
+        }
+    } else {
+        u32 insert_space_id = space_id;
+        for(u32 i = 0; i < space_id; i++) {
+            VramAllocation space = VRAM_ALLOCATION(s_vram_free_spaces, block_id, i);
+            if(space.size > aligned_space.size) {
+                insert_space_id = i;
+                break;
+            }
+        }
+        for(u32 i = 0; i < free_space_count; i++) {
+            VRAM_ALLOCATION(s_vram_free_spaces, block_id, i) = VRAM_ALLOCATION(s_vram_free_spaces, block_id, i + (i > space_id) - (i > insert_space_id));
+        }
+        VRAM_ALLOCATION(s_vram_free_spaces, block_id, insert_space_id) = aligned_space;
+    }
+    VramAllocation current_allocation;
+    u32 alloc_slot_id = U32_MAX;
+    u32 connection_slot_id = U32_MAX;
+    for(u32 i = 0; i < MEMORY_BLOCK_MAX_ALLOCATIONS; i++) {
+        current_allocation = VRAM_ALLOCATION(s_vram_allocations, block_id, i);
+        alloc_slot_id = (alloc_slot_id == U32_MAX && current_allocation.size == 0) ? i : alloc_slot_id;
+        connection_slot_id = (connection_slot_id == U32_MAX && current_allocation.size != 0 && current_allocation.offset + current_allocation.size == unaligned_space.offset) ? i : connection_slot_id; 
+        if(connection_slot_id != U32_MAX && alloc_slot_id != U32_MAX) break;
+    }
+    if(connection_slot_id != U32_MAX) {
+        VRAM_ALLOCATION(s_vram_allocations, block_id, connection_slot_id).size += unaligned_space.size;
+    }
+    VRAM_ALLOCATION(s_vram_allocations, block_id, alloc_slot_id) = allocation;
+    VRAM_ALLOCATION_COUNT(s_vram_allocation_counts, block_id)++;
+    *alloc_id = alloc_slot_id;
+    return VRAM_ALLOCATE_SUCCESS;
 }
 
 u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id) {
@@ -275,25 +281,28 @@ u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id,
 
     VkDevice device = getVulkanContextPtr()->device;
     VkMemoryRequirements* memory_requirements = alloca(sizeof(VkMemoryRequirements) * buffer_count);
+    u64 max_aligment = 1;
     for(u32 i = 0; i < buffer_count; i++) {
         vkGetBufferMemoryRequirements(device, buffers[i], memory_requirements + i);
         ERROR_CATCH(!(BIT(type_id) & memory_requirements[i].memoryTypeBits)) {
             return VRAM_ALLOCATE_WRONG_MEMORY_TYPE;
         }
-        allocation_size += memory_requirements[i].size;
+        allocation_size = ALIGN(allocation_size, memory_requirements[i].alignment) + memory_requirements[i].size;
+        max_aligment = MAX(max_aligment, memory_requirements[i].alignment);
     }
-    u32 result = vramAllocate(allocation_size, block_id, alloc_id);
-    ERROR_CATCH(result != VRAM_ALLOCATE_SUCESS) {
+    u32 result = vramAllocate(allocation_size, max_aligment, block_id, alloc_id);
+    ERROR_CATCH(result != VRAM_ALLOCATE_SUCCESS) {
         return result;
     }
     u64 offset = VRAM_ALLOCATION(s_vram_allocations, block_id, *alloc_id).offset;
     for(u32 i = 0; i < buffer_count; i++) {
+        offset = ALIGN(offset, memory_requirements[i].alignment);
         ERROR_CATCH(vkBindBufferMemory(device, buffers[i], s_vram_blocks[block_id].memory, offset) != VK_SUCCESS) {
             return VRAM_ALLOCATE_BUFFER_BIND_FAILED;
         }
         offset += memory_requirements[i].size;
     }
-    return VRAM_ALLOCATE_SUCESS;
+    return VRAM_ALLOCATE_SUCCESS;
 }
 
 u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u32* const alloc_id) {
@@ -302,25 +311,28 @@ u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u32
 
     VkDevice device = getVulkanContextPtr()->device;
     VkMemoryRequirements* memory_requirements = alloca(sizeof(VkMemoryRequirements) * image_count);
+    u64 max_aligment = 1;
     for(u32 i = 0; i < image_count; i++) {
         vkGetImageMemoryRequirements(device, images[i], memory_requirements + i);
         ERROR_CATCH(!(BIT(type_id) & memory_requirements[i].memoryTypeBits)) {
             return VRAM_ALLOCATE_WRONG_MEMORY_TYPE;
         }
-        allocation_size += memory_requirements[i].size;
+        allocation_size = ALIGN(allocation_size, memory_requirements[i].alignment) + memory_requirements[i].size;
+        max_aligment = MAX(max_aligment, memory_requirements[i].alignment);
     }
-    u32 result = vramAllocate(allocation_size, block_id, alloc_id);
-    ERROR_CATCH(result != VRAM_ALLOCATE_SUCESS) {
+    u32 result = vramAllocate(allocation_size, max_aligment, block_id, alloc_id);
+    ERROR_CATCH(result != VRAM_ALLOCATE_SUCCESS) {
         return result;
     }
     u64 offset = VRAM_ALLOCATION(s_vram_allocations, block_id, *alloc_id).offset;
     for(u32 i = 0; i < image_count; i++) {
+        offset = ALIGN(offset, memory_requirements[i].alignment);
         ERROR_CATCH(vkBindImageMemory(device, images[i], s_vram_blocks[block_id].memory, offset) != VK_SUCCESS) {
             return VRAM_ALLOCATE_BUFFER_BIND_FAILED;
         }
         offset += memory_requirements[i].size;
     }
-    return VRAM_ALLOCATE_SUCESS;
+    return VRAM_ALLOCATE_SUCCESS;
 }
 
 u32 vramFree(u32 block_id, u32 alloc_id) {
@@ -353,7 +365,6 @@ u32 vramFree(u32 block_id, u32 alloc_id) {
     }
     left_exists = left_id != U32_MAX;
     right_exists = right_id != U32_MAX;
-    
     block_free_space_count += !(right_exists || left_exists) - (right_exists && left_exists); // keep in mind that its a copy of count
     space_id += - (right_exists && (space_id != right_id)) - left_exists;
     for(u32 i = 0; i < block_free_space_count; i++) {

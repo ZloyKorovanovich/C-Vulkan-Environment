@@ -253,7 +253,7 @@ const ExtContext* getExtensionContextPtr(void);
 b32 recreateSwapchain(void);
 
 typedef enum {
-    VRAM_ALLOCATE_SUCESS = 0,
+    VRAM_ALLOCATE_SUCCESS = 0,
     VRAM_ALLOCATE_WRONG_MEMORY_TYPE,
     VRAM_ALLOCATE_TOO_MANY_ALLOCATIONS,
     VRAM_ALLOCATE_ALLOCATION_BIGGER_THAN_BLOCK,
@@ -277,7 +277,7 @@ typedef struct {
     u64 size;
 } VramMemoryDscr;
 
-u32 vramAllocate(u64 size, u32 block_id, u32* const alloc_id);
+u32 vramAllocate(u64 size, u64 aligment, u32 block_id, u32* alloc_id);
 u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id);
 u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u32* const alloc_id);
 u32 vramFree(u32 block_id, u32 alloc_id);
