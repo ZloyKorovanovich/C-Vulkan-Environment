@@ -14,8 +14,8 @@ typedef int i32;
 typedef short i16;
 typedef char i8;
 
-typedef unsigned long long u64x;
-typedef unsigned long u64;
+typedef unsigned long u32x64;
+typedef unsigned long long u64;
 typedef unsigned u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
@@ -58,6 +58,13 @@ typedef u32 Handle;
 #define ARG(n) argp[n]
 
 typedef b32 (*UpdateCallback) (f64 time, f64 delta);
+
+// ========================================================= PACKING
+// =================================================================
+
+#define PACK_32_TO_64(a, b) (((u64)(a) << 32) | (u64)(b))
+#define UNPACK_64_TO_32_A(a) ((u32)((a) >> 32)) 
+#define UNPACK_64_TO_32_B(b) ((u32)((b)))
 
 // =========================================================== CODES
 // =================================================================
@@ -124,6 +131,6 @@ for(u32 i = 0; i < count; i++) {                        \
     ptr[i] = value;                                     \
 }
 
-#define SAFE_DESTROY(ptr, func) if(ptr) {func; ptr = NULL;}
+#define SAFE_DESTROY(ptr, func) if(ptr) {func; ptr = 0;}
 
 #endif

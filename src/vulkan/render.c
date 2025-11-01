@@ -76,7 +76,7 @@ typedef struct {
     VkImage image;
     VkImageView view;
     VkFormat format;
-    u32 allocation_id;
+    u64 handle;
 } DepthBuffer;
 
 #define PIPELINE_COUNT 2
@@ -100,10 +100,6 @@ static DepthBuffer s_depth_buffer = (DepthBuffer){0};
 static EventCallback s_event_callback = NULL;
 
 #define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_event_callback, code, _fail)
-
-typedef struct {
-    float viewport_params[4];
-} GlobalUniformBuffer;
 
 // ================================================== SCREEN BUFFERS
 // =================================================================
@@ -144,7 +140,7 @@ b32 createDepthBuffer(VkDevice device) {
         }
     };
 
-    ERROR_CATCH(vramAllocateImages(1, &s_depth_buffer.image, MEMORY_BLOCK_DEVICE_ID, &s_depth_buffer.allocation_id) != VRAM_ALLOCATE_SUCCESS) {
+    ERROR_CATCH(vramAllocateImages(1, &s_depth_buffer.image, MEMORY_BLOCK_DEVICE_ID, &s_depth_buffer.handle) != VRAM_ALLOCATE_SUCCESS) {
         _INVOKE_CALLBACK(VK_ERR_FAILED_TO_ALLOCATE_DEPTH_IMAGE)
     }
     ERROR_CATCH(vkCreateImageView(device, &image_view_info, NULL, &s_depth_buffer.view) != VK_SUCCESS) {
@@ -159,7 +155,7 @@ _fail:
 void destroyDepthBuffer(VkDevice device) {
     vkDestroyImageView(device, s_depth_buffer.view, NULL);
     vkDestroyImage(device, s_depth_buffer.image, NULL);
-    vramFree(MEMORY_BLOCK_DEVICE_ID, s_depth_buffer.allocation_id);
+    vramFree(s_depth_buffer.handle);
     s_depth_buffer = (DepthBuffer){0};
 }
 
@@ -380,25 +376,40 @@ _fail:
 // ================================================ RENDER INTERFACE
 // =================================================================
 
-b32 renderLoop(UpdateCallback update_callback) {
-    VulkanContext vulkan_context = *getVulkanContextPtr();
-    QueueContext queue_context = *getQueueContextPtr();
-    ExtContext ext_context = *getExtensionContextPtr();
+typedef struct {
+    float viewport_params[4];
+} GlobalUniformBuffer;
 
+#define UNIFORM_BUFFER_USED_SIZE (sizeof(GlobalUniformBuffer))
+#define POSITION_BUFFER_USED_SIZE (sizeof(float) * 4 * 64)
+
+typedef struct {
+    VkCommandBuffer cmd_buffer;
     VkSemaphore image_available_semaphore;
     VkSemaphore image_finished_semaphore;
     VkFence in_flight_fence;
-    b32 func_result;
+    VkBufferMemoryBarrier position_buffer_barrier;
+    VkImageMemoryBarrier image_top_barrier;
+    VkImageMemoryBarrier image_bottom_barrier;
+} RenderObjects;
 
-    VkCommandBuffer command_buffer;
+typedef struct {
+    u64 host_handle;
+    u64 device_handle;
+    VkBuffer host_uniform_buffer;
+    VkBuffer device_uniform_buffer;
+    VkBuffer device_position_buffer;
+} RenderBuffers;
+
+i32 createRenderObjects(VkDevice device, const RenderBuffers* render_buffers, RenderObjects* const render_objects) {
     VkCommandBufferAllocateInfo cmbuffers_info = (VkCommandBufferAllocateInfo) {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandBufferCount = 1,
         .commandPool = s_command_pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
     };
-    ERROR_CATCH(vkAllocateCommandBuffers(vulkan_context.device, &cmbuffers_info, &command_buffer) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_COMMAND_BUFFER_ALLOCATE)
+    ERROR_CATCH(vkAllocateCommandBuffers(device, &cmbuffers_info, &render_objects->cmd_buffer) != VK_SUCCESS) {
+        return VK_ERR_COMMAND_BUFFER_ALLOCATE;
     }
     VkSemaphoreCreateInfo semaphore_info = (VkSemaphoreCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
@@ -407,14 +418,123 @@ b32 renderLoop(UpdateCallback update_callback) {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
-    ERROR_CATCH(vkCreateSemaphore(vulkan_context.device, &semaphore_info, NULL, &image_available_semaphore) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_SEAMAPHORE_CREATE)
+    ERROR_CATCH(vkCreateSemaphore(device, &semaphore_info, NULL, &render_objects->image_available_semaphore) != VK_SUCCESS) {
+        return VK_ERR_SEAMAPHORE_CREATE;
     };
-    ERROR_CATCH(vkCreateSemaphore(vulkan_context.device, &semaphore_info, NULL, &image_finished_semaphore) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_SEAMAPHORE_CREATE)
+    ERROR_CATCH(vkCreateSemaphore(device, &semaphore_info, NULL, &render_objects->image_finished_semaphore) != VK_SUCCESS) {
+        return VK_ERR_SEAMAPHORE_CREATE;
     };
-    ERROR_CATCH(vkCreateFence(vulkan_context.device, &fence_info, NULL, &in_flight_fence)) {
-        _INVOKE_CALLBACK(VK_ERR_FENCE_CREATE)
+    ERROR_CATCH(vkCreateFence(device, &fence_info, NULL, &render_objects->in_flight_fence)) {
+        return VK_ERR_FENCE_CREATE;
+    }
+
+    render_objects->image_top_barrier = (VkImageMemoryBarrier) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        }
+    };
+    render_objects->image_bottom_barrier = (VkImageMemoryBarrier) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        }
+    };
+    render_objects->position_buffer_barrier = (VkBufferMemoryBarrier) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .buffer = render_buffers->device_position_buffer,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .size = sizeof(float) * 3 * 64
+    };
+    return VK_CODE_SUCCESS;
+}
+
+void destroyRenderObjects(VkDevice device, RenderObjects* const render_objects) {
+    SAFE_DESTROY(render_objects->image_available_semaphore, vkDestroySemaphore(device, render_objects->image_available_semaphore, NULL))
+    SAFE_DESTROY(render_objects->image_finished_semaphore, vkDestroySemaphore(device, render_objects->image_finished_semaphore, NULL))
+    SAFE_DESTROY(render_objects->in_flight_fence, vkDestroyFence(device, render_objects->in_flight_fence, NULL))
+    *render_objects = (RenderObjects){0};
+}
+
+i32 createRenderBuffers(VkDevice device, const QueueContext* queue_context, RenderBuffers* const render_buffers) {
+    VkBufferCreateInfo buffer_create_info = (VkBufferCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = &queue_context->queue_locators[CURRENT_QUEUE_ID].family_id,
+        .size = UNIFORM_BUFFER_USED_SIZE,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+    ERROR_CATCH(vkCreateBuffer(device, &buffer_create_info, NULL, &render_buffers->device_uniform_buffer) != VK_SUCCESS) {
+        return VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_CREATE;
+    }
+    buffer_create_info = (VkBufferCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = &queue_context->queue_locators[CURRENT_QUEUE_ID].family_id,
+        .size = UNIFORM_BUFFER_USED_SIZE,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+    ERROR_CATCH(vkCreateBuffer(device, &buffer_create_info, NULL, &render_buffers->host_uniform_buffer) != VK_SUCCESS) {
+        return VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_CREATE;
+    }
+    buffer_create_info = (VkBufferCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .queueFamilyIndexCount = 1,
+        .pQueueFamilyIndices = &queue_context->queue_locators[CURRENT_QUEUE_ID].family_id,
+        .size = POSITION_BUFFER_USED_SIZE,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+    ERROR_CATCH(vkCreateBuffer(device, &buffer_create_info, NULL, &render_buffers->device_position_buffer) != VK_SUCCESS) {
+        return VK_ERR_POSITION_BUFFER_HOST_CREATE;
+    }
+
+    ERROR_CATCH(vramAllocateBuffers(1, &render_buffers->host_uniform_buffer, MEMORY_BLOCK_HOST_ID, &render_buffers->host_handle) != VRAM_ALLOCATE_SUCCESS) {
+        return VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_ALLOCATE;
+    }
+    ERROR_CATCH(vramAllocateBuffers(2, (VkBuffer[]){render_buffers->device_position_buffer, render_buffers->device_uniform_buffer}, MEMORY_BLOCK_DEVICE_ID, &render_buffers->device_handle) != VRAM_ALLOCATE_SUCCESS) {
+        return VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE;
+    }
+    return VK_CODE_SUCCESS;
+}
+
+void destroyRenderBuffers(VkDevice device, RenderBuffers* const render_buffers) {
+    SAFE_DESTROY(render_buffers->host_uniform_buffer, vkDestroyBuffer(device, render_buffers->host_uniform_buffer, NULL))
+    SAFE_DESTROY(render_buffers->device_uniform_buffer, vkDestroyBuffer(device, render_buffers->device_uniform_buffer, NULL))
+    SAFE_DESTROY(render_buffers->device_position_buffer, vkDestroyBuffer(device, render_buffers->device_position_buffer, NULL))
+    SAFE_DESTROY(render_buffers->host_handle, vramFree(render_buffers->host_handle))
+    SAFE_DESTROY(render_buffers->device_handle, vramFree(render_buffers->device_handle))
+}
+
+b32 renderLoop(UpdateCallback update_callback) {
+    b32 func_result;
+    VulkanContext vulkan_context = *getVulkanContextPtr();
+    QueueContext queue_context = *getQueueContextPtr();
+    ExtContext ext_context = *getExtensionContextPtr();
+
+    RenderBuffers render_buffers;
+    RenderObjects render_objects;
+    ERROR_CATCH(createRenderBuffers(vulkan_context.device, &queue_context, &render_buffers) != VK_CODE_SUCCESS) {
+        goto _fail;
+    }
+    ERROR_CATCH(createRenderObjects(vulkan_context.device, &render_buffers, &render_objects) != VK_CODE_SUCCESS) {
+        goto _fail;
     }
 
     VkRenderingAttachmentInfoKHR color_attachment = (VkRenderingAttachmentInfoKHR) {
@@ -441,93 +561,21 @@ b32 renderLoop(UpdateCallback update_callback) {
         .layerCount = 1,
         .pDepthAttachment = &depth_attachment
     };
-    VkImageMemoryBarrier image_memory_top_barrier = (VkImageMemoryBarrier) {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        }
-    };
-    VkImageMemoryBarrier image_memory_bottom_barrier = (VkImageMemoryBarrier) {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        }
-    };
+    
     VkViewport viewport;
     u32 image_id;
 
-
-    // buffer creation
-    VkBuffer global_uniform_buffer_device;
-    VkBuffer global_uniform_buffer_host;
-    VkBuffer position_buffer_device;
-    VkBufferCreateInfo buffer_create_info = (VkBufferCreateInfo) {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        .queueFamilyIndexCount = 1,
-        .pQueueFamilyIndices = &queue_context.queue_locators[CURRENT_QUEUE_ID].family_id,
-        .size = sizeof(GlobalUniformBuffer),
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
-    ERROR_CATCH(vkCreateBuffer(vulkan_context.device, &buffer_create_info, NULL, &global_uniform_buffer_device) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_CREATE)
-    }
-    buffer_create_info = (VkBufferCreateInfo) {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .queueFamilyIndexCount = 1,
-        .pQueueFamilyIndices = &queue_context.queue_locators[CURRENT_QUEUE_ID].family_id,
-        .size = sizeof(GlobalUniformBuffer),
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
-    ERROR_CATCH(vkCreateBuffer(vulkan_context.device, &buffer_create_info, NULL, &global_uniform_buffer_host) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_CREATE)
-    }
-    buffer_create_info = (VkBufferCreateInfo) {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        .queueFamilyIndexCount = 1,
-        .pQueueFamilyIndices = &queue_context.queue_locators[CURRENT_QUEUE_ID].family_id,
-        .size = sizeof(float) * 4 * 64,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
-    };
-    ERROR_CATCH(vkCreateBuffer(vulkan_context.device, &buffer_create_info, NULL, &position_buffer_device) != VK_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_POSITION_BUFFER_HOST_CREATE)
-    }
-
-    u32 gubuffer_host_id, buffers_device_id;
-    ERROR_CATCH(vramAllocateBuffers(1, &global_uniform_buffer_host, MEMORY_BLOCK_HOST_ID, &gubuffer_host_id) != VRAM_ALLOCATE_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_HOST_ALLOCATE)
-    }
-    ERROR_CATCH(vramAllocateBuffers(2, (VkBuffer[]){global_uniform_buffer_device, position_buffer_device}, MEMORY_BLOCK_DEVICE_ID, &buffers_device_id) != VRAM_ALLOCATE_SUCCESS) {
-        _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_DEVICE_ALLOCATE)
-    }
-
-    VkDescriptorBufferInfo descriptor_gubuffer_info = (VkDescriptorBufferInfo) {
-        .buffer = global_uniform_buffer_device,
+    // write scriptor sets
+    VkDescriptorBufferInfo descriptor_uniform_buffer_info = (VkDescriptorBufferInfo) {
+        .buffer = render_buffers.device_uniform_buffer,
         .offset = 0,
-        .range = sizeof(GlobalUniformBuffer)
+        .range = UNIFORM_BUFFER_USED_SIZE
     };
-    VkDescriptorBufferInfo descriptor_pbuffer_info = (VkDescriptorBufferInfo) {
-        .buffer = position_buffer_device,
+    VkDescriptorBufferInfo descriptor_position_buffer_info = (VkDescriptorBufferInfo) {
+        .buffer = render_buffers.device_position_buffer,
         .offset = 0,
-        .range = sizeof(float) * 4 * 64
+        .range = POSITION_BUFFER_USED_SIZE
     };
-    // write descriptor set
     VkWriteDescriptorSet descriptor_set_writes[] = {
         (VkWriteDescriptorSet) {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -536,7 +584,7 @@ b32 renderLoop(UpdateCallback update_callback) {
             .dstArrayElement = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .descriptorCount = 1,
-            .pBufferInfo = &descriptor_gubuffer_info,
+            .pBufferInfo = &descriptor_uniform_buffer_info,
             .pImageInfo = NULL,
             .pTexelBufferView = NULL
         },
@@ -547,26 +595,17 @@ b32 renderLoop(UpdateCallback update_callback) {
             .dstArrayElement = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = 1,
-            .pBufferInfo = &descriptor_pbuffer_info,
+            .pBufferInfo = &descriptor_position_buffer_info,
             .pImageInfo = NULL,
             .pTexelBufferView = NULL
         }
     };
     vkUpdateDescriptorSets(vulkan_context.device, 2, descriptor_set_writes, 0, NULL);
-
-    VkBufferMemoryBarrier position_buffer_barrier = (VkBufferMemoryBarrier) {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-        .buffer = position_buffer_device,
-        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .size = sizeof(float) * 3 * 64,
-        .srcQueueFamilyIndex = queue_context.queue_locators[CURRENT_QUEUE_ID].family_id
-    };
-
     // render loop
     while(!glfwWindowShouldClose(vulkan_context.window)) {
         glfwPollEvents();
-        vkWaitForFences(vulkan_context.device, 1, &in_flight_fence, VK_TRUE, U32_MAX);
-        VkResult image_acquire_result = vkAcquireNextImageKHR(vulkan_context.device, getSwapchainContextPtr()->swapchain, U32_MAX, image_available_semaphore, NULL, &image_id);
+        vkWaitForFences(vulkan_context.device, 1, &render_objects.in_flight_fence, VK_TRUE, U32_MAX);
+        VkResult image_acquire_result = vkAcquireNextImageKHR(vulkan_context.device, getSwapchainContextPtr()->swapchain, U32_MAX, render_objects.image_available_semaphore, NULL, &image_id);
         if(image_acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
             vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();
@@ -588,13 +627,13 @@ b32 renderLoop(UpdateCallback update_callback) {
             .y = 0
         };
 
-        image_memory_top_barrier.image = getSwapchainContextPtr()->images[image_id];
-        image_memory_bottom_barrier.image = getSwapchainContextPtr()->images[image_id];
+        render_objects.image_top_barrier.image = getSwapchainContextPtr()->images[image_id];
+        render_objects.image_bottom_barrier.image = getSwapchainContextPtr()->images[image_id];
             
         GlobalUniformBuffer gubuffer_struct = (GlobalUniformBuffer) {
             .viewport_params = {viewport.x, viewport.y, viewport.width, viewport.height}
         };
-        ERROR_CATCH(!vramWriteToAllocation(MEMORY_BLOCK_HOST_ID, gubuffer_host_id, (VramWriteDscr[]){{.src = &gubuffer_struct, .size = sizeof(GlobalUniformBuffer)}})) {
+        ERROR_CATCH(!vramWriteToAllocation(render_buffers.host_handle, (VramWriteDscr[]){{.src = &gubuffer_struct, .size = sizeof(GlobalUniformBuffer)}})) {
             _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_WRITE)
         }
         
@@ -603,9 +642,9 @@ b32 renderLoop(UpdateCallback update_callback) {
             .flags = 0,
             .pInheritanceInfo = NULL
         };
-        vkResetFences(vulkan_context.device, 1, &in_flight_fence);
-        vkResetCommandBuffer(command_buffer, 0);
-        vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);//@(Mitro): should chekc error if fails
+        vkResetFences(vulkan_context.device, 1, &render_objects.in_flight_fence);
+        vkResetCommandBuffer(render_objects.cmd_buffer, 0);
+        vkBeginCommandBuffer(render_objects.cmd_buffer, &command_buffer_begin_info);//@(Mitro): should chekc error if fails
 
         
         VkBufferCopy buffer_copy = (VkBufferCopy) {
@@ -613,66 +652,66 @@ b32 renderLoop(UpdateCallback update_callback) {
             .srcOffset = 0,
             .size = sizeof(GlobalUniformBuffer)
         };
-        vkCmdCopyBuffer(command_buffer, global_uniform_buffer_host, global_uniform_buffer_device, 1, &buffer_copy);
+        vkCmdCopyBuffer(render_objects.cmd_buffer, render_buffers.host_uniform_buffer, render_buffers.device_uniform_buffer, 1, &buffer_copy);
 
         vkCmdPipelineBarrier(
-            command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
+            render_objects.cmd_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
             0, 0, NULL, 0, NULL, 0, NULL
         );
 
         // distribution pass
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, s_pipeline_layouts[PIPELINE_DISTRIBUTION_ID], 0, 1, s_descriptor_sets, 0, NULL);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipeline_layouts[PIPELINE_TRIANGLE_ID], 0, 1, s_descriptor_sets, 0, NULL);
+        vkCmdBindDescriptorSets(render_objects.cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, s_pipeline_layouts[PIPELINE_DISTRIBUTION_ID], 0, 1, s_descriptor_sets, 0, NULL);
+        vkCmdBindDescriptorSets(render_objects.cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipeline_layouts[PIPELINE_TRIANGLE_ID], 0, 1, s_descriptor_sets, 0, NULL);
 
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, s_pipelines[PIPELINE_DISTRIBUTION_ID]);
-        vkCmdDispatch(command_buffer, 1, 1, 1);
+        vkCmdBindPipeline(render_objects.cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, s_pipelines[PIPELINE_DISTRIBUTION_ID]);
+        vkCmdDispatch(render_objects.cmd_buffer, 1, 1, 1);
         
 
         vkCmdPipelineBarrier(
-            command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
-            0, 0, NULL, 1, &position_buffer_barrier, 0, NULL
+            render_objects.cmd_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
+            0, 0, NULL, 1, &render_objects.position_buffer_barrier, 0, NULL
         );
         vkCmdPipelineBarrier(
-            command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
-            0, 0, NULL, 0, NULL, 1, &image_memory_top_barrier
+            render_objects.cmd_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
+            0, 0, NULL, 0, NULL, 1, &render_objects.image_top_barrier
         );
         color_attachment.imageView = getSwapchainContextPtr()->views[image_id];
         depth_attachment.imageView = s_depth_buffer.view;
 
-        ext_context.cmd_begin_rendering(command_buffer, &vk_rendeirng_info);
+        ext_context.cmd_begin_rendering(render_objects.cmd_buffer, &vk_rendeirng_info);
         
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipelines[PIPELINE_TRIANGLE_ID]);
-        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &vk_rendeirng_info.renderArea);
+        vkCmdBindPipeline(render_objects.cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipelines[PIPELINE_TRIANGLE_ID]);
+        vkCmdSetViewport(render_objects.cmd_buffer, 0, 1, &viewport);
+        vkCmdSetScissor(render_objects.cmd_buffer, 0, 1, &vk_rendeirng_info.renderArea);
 
-        vkCmdDraw(command_buffer, 3 * 64, 1, 0, 0);
+        vkCmdDraw(render_objects.cmd_buffer, 3 * 64, 1, 0, 0);
         //... DRAW here
 
-        ext_context.cmd_end_rendering(command_buffer);
+        ext_context.cmd_end_rendering(render_objects.cmd_buffer);
         vkCmdPipelineBarrier(
-            command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
-            0, 0, NULL, 0, NULL, 1, &image_memory_bottom_barrier
+            render_objects.cmd_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
+            0, 0, NULL, 0, NULL, 1, &render_objects.image_bottom_barrier
         );
 
-        vkEndCommandBuffer(command_buffer);
+        vkEndCommandBuffer(render_objects.cmd_buffer);
         VkSubmitInfo submit_info = (VkSubmitInfo) {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &image_available_semaphore,
+            .pWaitSemaphores = &render_objects.image_available_semaphore,
             .pWaitDstStageMask = (const VkPipelineStageFlags[]){VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &image_finished_semaphore,
+            .pSignalSemaphores = &render_objects.image_finished_semaphore,
             .commandBufferCount = 1,
-            .pCommandBuffers = &command_buffer
+            .pCommandBuffers = &render_objects.cmd_buffer
         };
-        ERROR_CATCH(vkQueueSubmit(queue_context.queues[CURRENT_QUEUE_ID], 1, &submit_info, in_flight_fence) != VK_SUCCESS) {
+        ERROR_CATCH(vkQueueSubmit(queue_context.queues[CURRENT_QUEUE_ID], 1, &submit_info, render_objects.in_flight_fence) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_QUEUE_SUBMIT)
         }
 
         VkPresentInfoKHR present_info = (VkPresentInfoKHR) {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &image_finished_semaphore,
+            .pWaitSemaphores = &render_objects.image_finished_semaphore,
             .swapchainCount = 1,
             .pSwapchains = &getSwapchainContextPtr()->swapchain,
             .pImageIndices = &image_id,
@@ -694,13 +733,9 @@ b32 renderLoop(UpdateCallback update_callback) {
 _fail:
     func_result = FALSE;
 _dispose:
-    SAFE_DESTROY(global_uniform_buffer_device, vkDestroyBuffer(vulkan_context.device, global_uniform_buffer_device, NULL))
-    SAFE_DESTROY(global_uniform_buffer_host, vkDestroyBuffer(vulkan_context.device, global_uniform_buffer_host, NULL))
-    SAFE_DESTROY(position_buffer_device, vkDestroyBuffer(vulkan_context.device, position_buffer_device, NULL))
 
-    SAFE_DESTROY(image_available_semaphore, vkDestroySemaphore(vulkan_context.device, image_available_semaphore, NULL))
-    SAFE_DESTROY(image_finished_semaphore, vkDestroySemaphore(vulkan_context.device, image_finished_semaphore, NULL))
-    SAFE_DESTROY(in_flight_fence, vkDestroyFence(vulkan_context.device, in_flight_fence, NULL))
+    destroyRenderObjects(vulkan_context.device, &render_objects);
+    destroyRenderBuffers(vulkan_context.device, &render_buffers);
     return func_result;
 }
 

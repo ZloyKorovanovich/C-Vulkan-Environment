@@ -114,7 +114,6 @@ b32 resourcesInit(const char* res_path) {
         vkCreateShaderModule(vulkan_context.device, &shader_module_info, NULL, s_shader_modules + i);
     }
     free(shader_buffer);
-
 //_sucess:
     return TRUE;
 _fail:

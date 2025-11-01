@@ -7,7 +7,7 @@
 // =================================================================
 
 typedef enum {
-    VK_CODE_SUCESS = 0,
+    VK_CODE_SUCCESS = 0,
 
     VK_ERR_GLFW_INIT = 1,
     VK_ERR_WINDOW_CREATE,
@@ -278,12 +278,12 @@ typedef struct {
     u64 size;
 } VramMemoryDscr;
 
-u32 vramAllocate(u64 size, u64 aligment, u32 block_id, u32* alloc_id);
-u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u32* const alloc_id);
-u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u32* const alloc_id);
-u32 vramFree(u32 block_id, u32 alloc_id);
-b32 vramWriteToAllocation(u32 block_id, u32 alloc_id, VramWriteDscr* write_dscr);
-void vramGetMemoryDscr(u32 block_id, u32 alloc_id, VramMemoryDscr* const memory_dscr);
+u32 vramAllocate(u64 size, u64 aligment, u32 block_id, u64* const handle);
+u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u64* const handle);
+u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u64* const handle);
+u32 vramFree(u64 handle);
+b32 vramWriteToAllocation(u64 handle, VramWriteDscr* write_dscr);
+void vramGetMemoryDscr(u64 handle, VramMemoryDscr* const memory_dscr);
 void vramDebugPrintLayout(void);
 
 const VkShaderModule* getShaderModulesPtr(void);
