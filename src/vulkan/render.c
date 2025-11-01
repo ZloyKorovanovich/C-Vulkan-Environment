@@ -458,7 +458,7 @@ i32 createRenderObjects(VkDevice device, const RenderBuffers* render_buffers, Re
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
         .buffer = render_buffers->device_position_buffer,
         .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .size = sizeof(float) * 3 * 64
+        .size = POSITION_BUFFER_USED_SIZE
     };
     return VK_CODE_SUCCESS;
 }
@@ -524,17 +524,20 @@ void destroyRenderBuffers(VkDevice device, RenderBuffers* const render_buffers) 
 
 b32 renderLoop(UpdateCallback update_callback) {
     b32 func_result;
+    i32 call_result;
     VulkanContext vulkan_context = *getVulkanContextPtr();
     QueueContext queue_context = *getQueueContextPtr();
     ExtContext ext_context = *getExtensionContextPtr();
 
     RenderBuffers render_buffers;
     RenderObjects render_objects;
-    ERROR_CATCH(createRenderBuffers(vulkan_context.device, &queue_context, &render_buffers) != VK_CODE_SUCCESS) {
-        goto _fail;
+    call_result = createRenderBuffers(vulkan_context.device, &queue_context, &render_buffers);
+    ERROR_CATCH(call_result != VK_CODE_SUCCESS) {
+        _INVOKE_CALLBACK(call_result)
     }
-    ERROR_CATCH(createRenderObjects(vulkan_context.device, &render_buffers, &render_objects) != VK_CODE_SUCCESS) {
-        goto _fail;
+    call_result = createRenderObjects(vulkan_context.device, &render_buffers, &render_objects);
+    ERROR_CATCH(call_result != VK_CODE_SUCCESS) {
+        _INVOKE_CALLBACK(call_result)
     }
 
     VkRenderingAttachmentInfoKHR color_attachment = (VkRenderingAttachmentInfoKHR) {
@@ -668,7 +671,7 @@ b32 renderLoop(UpdateCallback update_callback) {
         
 
         vkCmdPipelineBarrier(
-            render_objects.cmd_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
+            render_objects.cmd_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 
             0, 0, NULL, 1, &render_objects.position_buffer_barrier, 0, NULL
         );
         vkCmdPipelineBarrier(

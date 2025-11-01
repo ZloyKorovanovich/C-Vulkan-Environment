@@ -2,7 +2,7 @@
 #include "vulkan/vulkan.h"
 
 b32 debugCallback(u32 code) {
-    printf("error: %u\n", code);
+    printf("error: module %u, code %u\n", CODE_UNPACK_MODULE(code), CODE_UNPACK_CODE(code));
     return TRUE;
 }
 
