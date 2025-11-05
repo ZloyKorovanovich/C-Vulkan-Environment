@@ -383,10 +383,14 @@ typedef struct {
 #define UNIFORM_BUFFER_USED_SIZE (sizeof(GlobalUniformBuffer))
 #define POSITION_BUFFER_USED_SIZE (sizeof(float) * 4 * 64)
 
+/*
+    all objects like image_available_semaphore, frame_fence etc should be one pre frame in-flight
+    BUT! subnit semaphores should be one per swapchain imaged and indexed with aquire image id
+*/
 typedef struct {
-    VkCommandBuffer cmd_buffer;
+    VkSemaphore image_submit_semaphores[SWAPCHAIN_MAX_IMAGE_COUNT];
     VkSemaphore image_available_semaphore;
-    VkSemaphore image_finished_semaphore;
+    VkCommandBuffer cmd_buffer;
     VkFence frame_fence;
     VkBufferMemoryBarrier position_buffer_barrier;
     VkImageMemoryBarrier image_top_barrier;
@@ -418,10 +422,12 @@ i32 createRenderObjects(VkDevice device, const RenderBuffers* render_buffers, Re
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
+    for(u32 i = 0; i < SWAPCHAIN_MAX_IMAGE_COUNT; i++) {
+        ERROR_CATCH(vkCreateSemaphore(device, &semaphore_info, NULL, render_objects->image_submit_semaphores + i) != VK_SUCCESS) {
+            return VK_ERR_SEAMAPHORE_CREATE;
+        };
+    }
     ERROR_CATCH(vkCreateSemaphore(device, &semaphore_info, NULL, &render_objects->image_available_semaphore) != VK_SUCCESS) {
-        return VK_ERR_SEAMAPHORE_CREATE;
-    };
-    ERROR_CATCH(vkCreateSemaphore(device, &semaphore_info, NULL, &render_objects->image_finished_semaphore) != VK_SUCCESS) {
         return VK_ERR_SEAMAPHORE_CREATE;
     };
     ERROR_CATCH(vkCreateFence(device, &fence_info, NULL, &render_objects->frame_fence)) {
@@ -464,8 +470,10 @@ i32 createRenderObjects(VkDevice device, const RenderBuffers* render_buffers, Re
 }
 
 void destroyRenderObjects(VkDevice device, RenderObjects* const render_objects) {
+    for(u32 i = 0; i < SWAPCHAIN_MAX_IMAGE_COUNT; i++) {
+        SAFE_DESTROY(render_objects->image_submit_semaphores[i], vkDestroySemaphore(device, render_objects->image_submit_semaphores[i], NULL))
+    }
     SAFE_DESTROY(render_objects->image_available_semaphore, vkDestroySemaphore(device, render_objects->image_available_semaphore, NULL))
-    SAFE_DESTROY(render_objects->image_finished_semaphore, vkDestroySemaphore(device, render_objects->image_finished_semaphore, NULL))
     SAFE_DESTROY(render_objects->frame_fence, vkDestroyFence(device, render_objects->frame_fence, NULL))
     *render_objects = (RenderObjects){0};
 }
@@ -703,7 +711,7 @@ b32 renderLoop(UpdateCallback update_callback) {
             .pWaitSemaphores = &render_objects.image_available_semaphore,
             .pWaitDstStageMask = (const VkPipelineStageFlags[]){VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &render_objects.image_finished_semaphore,
+            .pSignalSemaphores = &render_objects.image_submit_semaphores[image_id],
             .commandBufferCount = 1,
             .pCommandBuffers = &render_objects.cmd_buffer
         };
@@ -714,7 +722,7 @@ b32 renderLoop(UpdateCallback update_callback) {
         VkPresentInfoKHR present_info = (VkPresentInfoKHR) {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &render_objects.image_finished_semaphore,
+            .pWaitSemaphores = &render_objects.image_submit_semaphores[image_id],
             .swapchainCount = 1,
             .pSwapchains = &getSwapchainContextPtr()->swapchain,
             .pImageIndices = &image_id,
