@@ -387,7 +387,7 @@ typedef struct {
     VkCommandBuffer cmd_buffer;
     VkSemaphore image_available_semaphore;
     VkSemaphore image_finished_semaphore;
-    VkFence in_flight_fence;
+    VkFence frame_fence;
     VkBufferMemoryBarrier position_buffer_barrier;
     VkImageMemoryBarrier image_top_barrier;
     VkImageMemoryBarrier image_bottom_barrier;
@@ -424,7 +424,7 @@ i32 createRenderObjects(VkDevice device, const RenderBuffers* render_buffers, Re
     ERROR_CATCH(vkCreateSemaphore(device, &semaphore_info, NULL, &render_objects->image_finished_semaphore) != VK_SUCCESS) {
         return VK_ERR_SEAMAPHORE_CREATE;
     };
-    ERROR_CATCH(vkCreateFence(device, &fence_info, NULL, &render_objects->in_flight_fence)) {
+    ERROR_CATCH(vkCreateFence(device, &fence_info, NULL, &render_objects->frame_fence)) {
         return VK_ERR_FENCE_CREATE;
     }
 
@@ -466,7 +466,7 @@ i32 createRenderObjects(VkDevice device, const RenderBuffers* render_buffers, Re
 void destroyRenderObjects(VkDevice device, RenderObjects* const render_objects) {
     SAFE_DESTROY(render_objects->image_available_semaphore, vkDestroySemaphore(device, render_objects->image_available_semaphore, NULL))
     SAFE_DESTROY(render_objects->image_finished_semaphore, vkDestroySemaphore(device, render_objects->image_finished_semaphore, NULL))
-    SAFE_DESTROY(render_objects->in_flight_fence, vkDestroyFence(device, render_objects->in_flight_fence, NULL))
+    SAFE_DESTROY(render_objects->frame_fence, vkDestroyFence(device, render_objects->frame_fence, NULL))
     *render_objects = (RenderObjects){0};
 }
 
@@ -607,8 +607,8 @@ b32 renderLoop(UpdateCallback update_callback) {
     // render loop
     while(!glfwWindowShouldClose(vulkan_context.window)) {
         glfwPollEvents();
-        vkWaitForFences(vulkan_context.device, 1, &render_objects.in_flight_fence, VK_TRUE, U32_MAX);
-        VkResult image_acquire_result = vkAcquireNextImageKHR(vulkan_context.device, getSwapchainContextPtr()->swapchain, U32_MAX, render_objects.image_available_semaphore, NULL, &image_id);
+        vkWaitForFences(vulkan_context.device, 1, &render_objects.frame_fence, VK_TRUE, U64_MAX);
+        VkResult image_acquire_result = vkAcquireNextImageKHR(vulkan_context.device, getSwapchainContextPtr()->swapchain, U64_MAX, render_objects.image_available_semaphore, NULL, &image_id);
         if(image_acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
             vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();
@@ -645,7 +645,7 @@ b32 renderLoop(UpdateCallback update_callback) {
             .flags = 0,
             .pInheritanceInfo = NULL
         };
-        vkResetFences(vulkan_context.device, 1, &render_objects.in_flight_fence);
+        vkResetFences(vulkan_context.device, 1, &render_objects.frame_fence);
         vkResetCommandBuffer(render_objects.cmd_buffer, 0);
         vkBeginCommandBuffer(render_objects.cmd_buffer, &command_buffer_begin_info);//@(Mitro): should chekc error if fails
 
@@ -707,7 +707,7 @@ b32 renderLoop(UpdateCallback update_callback) {
             .commandBufferCount = 1,
             .pCommandBuffers = &render_objects.cmd_buffer
         };
-        ERROR_CATCH(vkQueueSubmit(queue_context.queues[CURRENT_QUEUE_ID], 1, &submit_info, render_objects.in_flight_fence) != VK_SUCCESS) {
+        ERROR_CATCH(vkQueueSubmit(queue_context.queues[CURRENT_QUEUE_ID], 1, &submit_info, render_objects.frame_fence) != VK_SUCCESS) {
             _INVOKE_CALLBACK(VK_ERR_QUEUE_SUBMIT)
         }
 
@@ -760,10 +760,14 @@ b32 renderInit(EventCallback event_callback) {
     VkDescriptorPoolCreateInfo descriptor_pool_info = (VkDescriptorPoolCreateInfo) {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .maxSets = DESCRIPTOR_SET_COUNT,
-        .poolSizeCount = 1,
+        .poolSizeCount = 2,
         .pPoolSizes = (VkDescriptorPoolSize[]) {
             (VkDescriptorPoolSize) {
                 .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = DESCRIPTOR_MAX_COUNT
+            },
+            (VkDescriptorPoolSize) {
+                .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = DESCRIPTOR_MAX_COUNT
             }
         }
