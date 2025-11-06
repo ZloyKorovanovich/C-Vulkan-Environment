@@ -25,7 +25,7 @@ i32 main(i32 argc, char** argv) {
     strcat(shader_path, "/data/");
     printf("path %s\n", shader_path);
 
-    coreInit(800, 600, VULKAN_FLAG_DEBUG | VULKAN_FLAG_RESIZABLE, &debugCallback);
+    coreInit(800, 600, VULKAN_FLAG_RESIZABLE, &debugCallback);
     vramInit(NULL);
     resourcesInit(shader_path);
     renderInit(NULL);
