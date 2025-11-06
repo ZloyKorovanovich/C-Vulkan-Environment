@@ -2,10 +2,13 @@
 #define _MAIN_INCLUDED
 #include <stdlib.h>
 #include <stdio.h>
-//#include <malloc.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <malloc.h>
+#elif defined(linux)
 #include <alloca.h>
+#endif
 
 // =========================================================== TYPES
 // =================================================================
