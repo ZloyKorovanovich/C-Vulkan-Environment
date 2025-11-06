@@ -1,26 +1,21 @@
 #ifndef _MAIN_INCLUDED
 #define _MAIN_INCLUDED
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 
-#ifdef _WIN32
+#include <stdio.h>
 #include <malloc.h>
-#elif defined(linux)
-#include <alloca.h>
-#endif
+#include <string.h>
 
 // =========================================================== TYPES
 // =================================================================
 
-typedef long long i64x;
-typedef long i64;
+typedef long long i64;
+typedef long i64x;
 typedef int i32;
 typedef short i16;
 typedef char i8;
 
-typedef unsigned long u32x64;
 typedef unsigned long long u64;
+typedef unsigned long u32x;
 typedef unsigned u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
@@ -83,7 +78,10 @@ typedef b32 (*UpdateCallback) (f64 time, f64 delta);
 // +----------------+----------------+--------------------------------+
 // IN HEX NUMBER: MMRRCCCC
 
-typedef b32 (*EventCallback) (u32 event_code);
+typedef u32 result;
+typedef b32 (*EventCallback) (result event_code);
+
+#define CODE_SUCCESS 0
 
 #define CODE_MASK_MODULE        0xff000000
 #define CODE_MASK_RESERVED      0x00ff0000
@@ -132,7 +130,7 @@ typedef enum {
 // ================================================================= 
 
 #define MIN_STACK 16
-#define ZE_ALLOCA(bytes) alloca((MIN_STACK > bytes) ? MIN_STACK : bytes)
+#define ZE_ALLOCA(bytes) _alloca((MIN_STACK > bytes) ? MIN_STACK : bytes)
 
 #define SET_MEMORY(ptr, value, count, i)                \
 for(u32 i = 0; i < count; i++) {                        \

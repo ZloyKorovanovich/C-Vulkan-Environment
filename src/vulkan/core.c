@@ -111,7 +111,7 @@ static ExtContext s_ext_context = (ExtContext){0};
 static SwapchainContext s_swapchain_context = (SwapchainContext){0};
 
 b32 defaultCallback(u32 code) {
-    return 1;
+    return (code != CODE_SUCCESS);
 }
 
 // ============================================================ GLFW
@@ -353,17 +353,23 @@ void getScreenDescriptor(GLFWwindow* window, VkSurfaceKHR surface, VkPhysicalDev
 // ================================================ RENDER INTERFACE
 // =================================================================
 
-#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_vulkan_context.callback, code, _fail)
+
+#define _INVOKE_CALLBACK(code)                                                  \
+return_code = MAKE_VK_ERR(code);                                                \
+if(s_vulkan_context.callback(return_code)) {                                    \
+    goto _end;                                                                  \
+}
 #define _LOAD_EXT_FUNC(pfn, name)                                               \
 pfn = (void*)vkGetInstanceProcAddr(s_vulkan_context.instance, #name);           \
 if(!pfn) {                                                                      \
     _INVOKE_CALLBACK(VK_ERR_LOAD_EXT_PFN)                                       \
 }
 
-b32 coreInit(u32 width, u32 height, u32 flags, EventCallback callback) {
+result coreInit(u32 width, u32 height, u32 flags, EventCallback callback) {
+    result return_code = CODE_SUCCESS;
     // necessary to do the work and handle VK_ERRs
     s_vulkan_context.callback = callback ? callback : &defaultCallback;
-
+    
     // creating window
     ERROR_CATCH(!glfwInit()) {
         _INVOKE_CALLBACK(VK_ERR_GLFW_INIT)
@@ -575,10 +581,8 @@ b32 coreInit(u32 width, u32 height, u32 flags, EventCallback callback) {
         }
     }
 
-//_sucess:
-    return TRUE;
-_fail:
-    return FALSE;
+_end:
+    return return_code;
 }
 
 void coreTerminate(void) {
@@ -610,7 +614,8 @@ void coreTerminate(void) {
 // =================================================================
 
 // this function should be called when window is resized
-b32 recreateSwapchain(void) {
+result recreateSwapchain(void) {
+    result return_code = CODE_SUCCESS;
     for(u32 i = 0; i < s_swapchain_context.image_count; i++) {
         SAFE_DESTROY(s_swapchain_context.views[i], vkDestroyImageView(s_vulkan_context.device, s_swapchain_context.views[i], NULL))
     }
@@ -669,13 +674,11 @@ b32 recreateSwapchain(void) {
     for(u32 i = 0; i < s_swapchain_context.image_count; i++) {
         view_info.image = s_swapchain_context.images[i];
         if(vkCreateImageView(s_vulkan_context.device, &view_info, NULL, s_swapchain_context.views + i) != VK_SUCCESS) {
-            _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_VIEW_CREATE)
+            _INVOKE_CALLBACK(VK_ERR_SWAPCHAIN_CREATE)
         }
     }
-//_sucess:
-    return TRUE;
-_fail:
-    return FALSE;
+_end:
+    return return_code;
 }
 
 const VulkanContext* getVulkanContextPtr(void) {

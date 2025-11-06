@@ -147,10 +147,15 @@ _found:
     return TRUE;
 }
 
-#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code, _fail)
+#define _INVOKE_CALLBACK(code)                                                  \
+return_code = MAKE_VK_ERR(code);                                                \
+if(s_callback(return_code)) {                                                   \
+    goto _end;                                                                  \
+}
 
-b32 vramInit(EventCallback callback) {
+result vramInit(EventCallback callback) {
     VulkanContext vulkan_context = *getVulkanContextPtr();
+    result return_code = CODE_SUCCESS;
     s_callback = callback ? callback : vulkan_context.callback;
 
     ERROR_CATCH(!layoutDeviceMemory(vulkan_context.physical_device, MEMORY_BLOCK_COUNT, (MemoryBlockDscr[])MEMORY_BLOCK_DESCRIPTORS, s_vram_blocks)) {
@@ -190,10 +195,8 @@ b32 vramInit(EventCallback callback) {
         };
     }
 
-//_sucess:
-    return TRUE;
-_fail:
-    return FALSE;
+_end:
+    return return_code;
 }
 
 void vramTerminate(void) {
@@ -209,7 +212,7 @@ void vramTerminate(void) {
     s_callback = NULL;
 }
 
-u32 vramAllocate(u64 size, u64 aligment, u32 block_id, u64* const handle) {
+result vramAllocate(u64 size, u64 aligment, u32 block_id, u64* const handle) {
     ERROR_CATCH(size > s_vram_blocks[block_id].size) {
         return VRAM_ALLOCATE_ALLOCATION_BIGGER_THAN_BLOCK;
     }
@@ -278,7 +281,7 @@ _found_block:
     return VRAM_ALLOCATE_SUCCESS;
 }
 
-u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u64* const handle) {
+result vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u64* const handle) {
     u64 allocation_size = 0;
     u32 type_id = s_vram_blocks[block_id].type_id;
 
@@ -310,7 +313,7 @@ u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id,
     return VRAM_ALLOCATE_SUCCESS;
 }
 
-u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u64* const handle) {
+result vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u64* const handle) {
     u64 allocation_size = 0;
     u32 type_id = s_vram_blocks[block_id].type_id;
 
@@ -342,7 +345,7 @@ u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u64
     return VRAM_ALLOCATE_SUCCESS;
 }
 
-u32 vramFree(u64 handle) {
+result vramFree(u64 handle) {
     u32 block_id, alloc_id;
     UNPACK_MEMORY_HANDLE(handle, block_id, alloc_id)
 

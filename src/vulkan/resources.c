@@ -81,10 +81,15 @@ b32 readShaderFile(const char* path, u64 buffer_size, char* const buffer) {
     return TRUE;
 }
 
-#define _INVOKE_CALLBACK(code) INVOKE_CALLBACK(s_callback, code, _fail)
+#define _INVOKE_CALLBACK(code)                                                  \
+return_code = MAKE_VK_ERR(code);                                                \
+if(s_callback(return_code)) {                                                   \
+    goto _end;                                                                  \
+}
 
-b32 resourcesInit(const char* res_path) {
+result resourcesInit(const char* res_path) {
     VulkanContext vulkan_context = *getVulkanContextPtr();
+    result return_code = CODE_SUCCESS;
     s_callback = vulkan_context.callback;
     // path generation
     char shader_path[256];
@@ -113,11 +118,9 @@ b32 resourcesInit(const char* res_path) {
         shader_module_info.codeSize = c_shader_infos[i].code_size;
         vkCreateShaderModule(vulkan_context.device, &shader_module_info, NULL, s_shader_modules + i);
     }
-    free(shader_buffer);
-//_sucess:
-    return TRUE;
-_fail:
-    return FALSE;
+_end:
+    SAFE_DESTROY(shader_buffer, free(shader_buffer))
+    return return_code;
 }
 
 void resourcesTerminate(void) {

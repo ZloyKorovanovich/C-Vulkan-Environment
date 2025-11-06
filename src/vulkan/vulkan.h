@@ -7,8 +7,6 @@
 // =================================================================
 
 typedef enum {
-    VK_CODE_SUCCESS = 0,
-
     VK_ERR_GLFW_INIT = 1,
     VK_ERR_WINDOW_CREATE,
     VK_ERR_DEBUG_LAYERS_NOT_PRESENT,
@@ -73,17 +71,17 @@ typedef enum {
     VULKAN_FLAG_RESIZABLE = BIT(2),
 } VulkanFlags;
 
-b32 coreInit(u32 width, u32 height, u32 flags, EventCallback callback);
+result coreInit(u32 width, u32 height, u32 flags, EventCallback callback);
 void coreTerminate(void);
-b32 vramInit(EventCallback callback);
+result vramInit(EventCallback callback);
 void vramTerminate(void);
 
-b32 resourcesInit(const char* res_path);
+result resourcesInit(const char* res_path);
 void resourcesTerminate(void);
 
-b32 renderInit(EventCallback event_callback);
+result renderInit(EventCallback event_callback);
 void renderTerminate(void);
-b32 renderLoop(UpdateCallback update_callback) ;
+result renderLoop(UpdateCallback update_callback) ;
 
 // ============================================== INTERNAL INTERFACE
 // =================================================================
@@ -197,8 +195,7 @@ typedef struct {
 // ========================================================= HELPERS
 // =================================================================
 
-#define VULKAN_VK_ERR(code) CODE_PACK_CODE(CODE_PACK_MODULE(CODE_MASK_EMPTY, CODE_MODULE_VULKAN), code)
-#define INVOKE_CALLBACK(callback, code, label) if(callback(VULKAN_VK_ERR(code))) goto label;
+#define MAKE_VK_ERR(code) CODE_PACK_CODE(CODE_PACK_MODULE(CODE_MASK_EMPTY, CODE_MODULE_VULKAN), code)
 
 typedef struct {
     u32 family_id;
@@ -251,7 +248,7 @@ const SwapchainContext* getSwapchainContextPtr(void);
 const QueueContext* getQueueContextPtr(void);
 const ExtContext* getExtensionContextPtr(void);
 
-b32 recreateSwapchain(void);
+result recreateSwapchain(void);
 
 typedef enum {
     VRAM_ALLOCATE_SUCCESS = 0,
@@ -278,10 +275,10 @@ typedef struct {
     u64 size;
 } VramMemoryDscr;
 
-u32 vramAllocate(u64 size, u64 aligment, u32 block_id, u64* const handle);
-u32 vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u64* const handle);
-u32 vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u64* const handle);
-u32 vramFree(u64 handle);
+result vramAllocate(u64 size, u64 aligment, u32 block_id, u64* const handle);
+result vramAllocateBuffers(u32 buffer_count, const VkBuffer* buffers, u32 block_id, u64* const handle);
+result vramAllocateImages(u32 image_count, const VkImage* images, u32 block_id, u64* const handle);
+result vramFree(u64 handle);
 b32 vramWriteToAllocation(u64 handle, VramWriteDscr* write_dscr);
 void vramGetMemoryDscr(u64 handle, VramMemoryDscr* const memory_dscr);
 void vramDebugPrintLayout(void);

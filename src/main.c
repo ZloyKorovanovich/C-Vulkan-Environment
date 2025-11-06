@@ -25,11 +25,13 @@ i32 main(i32 argc, char** argv) {
     strcat(shader_path, "/data/");
     printf("path %s\n", shader_path);
 
-    coreInit(800, 600, VULKAN_FLAG_RESIZABLE, &debugCallback);
-    vramInit(NULL);
-    resourcesInit(shader_path);
-    renderInit(NULL);
-    renderLoop(NULL);
+    if(coreInit(800, 600, VULKAN_FLAG_RESIZABLE, &debugCallback)) goto _dispose;
+    if(vramInit(NULL)) goto _dispose;
+    if(resourcesInit(shader_path)) goto _dispose;
+    if(renderInit(NULL)) goto _dispose;
+    if(renderLoop(NULL)) goto _dispose;
+    
+_dispose:
     renderTerminate();
     resourcesTerminate();
     vramTerminate();
