@@ -385,7 +385,7 @@ typedef struct {
 
 /*
     all objects like image_available_semaphore, frame_fence etc should be one pre frame in-flight
-    BUT! subnit semaphores should be one per swapchain imaged and indexed with aquire image id
+    BUT! submit semaphores should be one per swapchain imaged and indexed with aquire image id
 */
 typedef struct {
     VkSemaphore image_submit_semaphores[SWAPCHAIN_MAX_IMAGE_COUNT];
@@ -612,11 +612,34 @@ b32 renderLoop(UpdateCallback update_callback) {
         }
     };
     vkUpdateDescriptorSets(vulkan_context.device, 2, descriptor_set_writes, 0, NULL);
+    
+#ifdef linux
+#define _WINDOW_MIN_SIZE 16
+    int last_width, last_height;
+    int current_width, current_height;
+    glfwGetFramebufferSize(vulkan_context.window, &current_width, &current_height);
+    last_width = MAX(_WINDOW_MIN_SIZE, current_width);
+    last_height = MAX(_WINDOW_MIN_SIZE, current_height);
+#endif
+
     // render loop
     while(!glfwWindowShouldClose(vulkan_context.window)) {
         glfwPollEvents();
         vkWaitForFences(vulkan_context.device, 1, &render_objects.frame_fence, VK_TRUE, U64_MAX);
         VkResult image_acquire_result = vkAcquireNextImageKHR(vulkan_context.device, getSwapchainContextPtr()->swapchain, U64_MAX, render_objects.image_available_semaphore, NULL, &image_id);
+        
+#ifdef linux
+        glfwGetFramebufferSize(vulkan_context.window, &current_width, &current_height);
+        if((current_width > _WINDOW_MIN_SIZE && current_width != last_width) || (current_height > _WINDOW_MIN_SIZE && current_height != last_height)) {
+            vkDeviceWaitIdle(vulkan_context.device);
+            recreateSwapchain();
+            destroyDepthBuffer(vulkan_context.device);
+            createDepthBuffer(vulkan_context.device);
+            last_width = MAX(_WINDOW_MIN_SIZE, current_width);
+            last_height = MAX(_WINDOW_MIN_SIZE, current_height);
+            continue;
+        }
+#else
         if(image_acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
             vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();
@@ -624,6 +647,7 @@ b32 renderLoop(UpdateCallback update_callback) {
             createDepthBuffer(vulkan_context.device);
             continue;
         }
+#endif
 
         vk_rendeirng_info.renderArea = (VkRect2D) {
             .extent = getSwapchainContextPtr()->descriptor.extent,

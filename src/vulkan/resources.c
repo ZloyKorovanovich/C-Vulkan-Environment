@@ -89,7 +89,7 @@ b32 resourcesInit(const char* res_path) {
     // path generation
     char shader_path[256];
     strcpy(shader_path, res_path);
-    strcat(shader_path, "\\shaders.res");
+    strcat(shader_path, "shaders.res");
 
 
     // read shaders and create shader objects
