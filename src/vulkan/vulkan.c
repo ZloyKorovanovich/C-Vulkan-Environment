@@ -8,8 +8,8 @@ static const ThreadCommandBuffer* s_thread_command_buffer;
 
 result updateCallback(f64 time, f64 delta) {
     result return_code = CODE_SUCCESS;
-
-    if(s_thread_command_buffer->thread_lock != 0) {
+    atomic_uint thread_lock = atomic_load(&s_thread_command_buffer->thread_lock);
+    if(thread_lock != 0) {
         goto _end;
     }
 
@@ -28,6 +28,7 @@ _end:
 DWORD WINAPI vulkanRun(void* arg) {
     VulkanThreadBuffer thread_buffer = *((VulkanThreadBuffer*)arg);
     result call_result = CODE_SUCCESS;
+    s_thread_command_buffer = thread_buffer.command_buffer;
     ERROR_CATCH_CALL(coreInit(thread_buffer.width, thread_buffer.height, thread_buffer.flags, thread_buffer.callback))
     ERROR_CATCH_CALL(vramInit(NULL))
     ERROR_CATCH_CALL(resourcesInit(thread_buffer.data_path))
@@ -35,9 +36,11 @@ DWORD WINAPI vulkanRun(void* arg) {
     ERROR_CATCH_CALL(renderLoop(&updateCallback))
 _end:
     renderTerminate();
+    s_thread_command_buffer = NULL;
     resourcesTerminate();
     vramTerminate();
     coreTerminate();
-    return (DWORD)call_result;
+    *thread_buffer.return_code = call_result;
+    return 0;
 }
 #endif

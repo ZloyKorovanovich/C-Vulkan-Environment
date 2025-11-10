@@ -78,6 +78,7 @@ typedef struct {
     const ThreadCommandBuffer* command_buffer;
     const char* data_path;
     EventCallback callback;
+    result* return_code;
     u32 width;
     u32 height;
     u32 flags;

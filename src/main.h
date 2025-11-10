@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <malloc.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -63,6 +64,8 @@ typedef u32 Handle;
 
 #define DYN_ARG u32 argc, u64* argp
 #define ARG(n) argp[n]
+
+#define LOOP while(1)
 
 // ========================================================= PACKING
 // =================================================================
@@ -148,10 +151,14 @@ typedef enum {
     COMMAND_CODE_NONE = 0,
     COMMAND_CODE_EXIT,
 } CommandCodes;
-
+#define COMMAND_COUNT 2
+#define COMMAND_NAMES   {       \
+    "none",                     \
+    "exit"                      \
+}
 
 typedef struct {
-    volatile u32 thread_lock;
+    atomic_uint thread_lock;
     u32 command;
     void* data;
 } ThreadCommandBuffer;

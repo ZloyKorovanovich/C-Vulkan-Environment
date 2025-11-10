@@ -7,6 +7,8 @@
 #include <pthread.h>
 #endif
 
+const char* c_command_names[] = COMMAND_NAMES;
+
 
 b32 debugCallback(u32 code) {
     printf("error: module %u, code %u\n", CODE_UNPACK_MODULE(code), CODE_UNPACK_CODE(code));
@@ -38,33 +40,58 @@ i32 main(i32 argc, char** argv) {
         .command = 0,
         .data = NULL
     };
+
+    result vulkan_result;
     VulkanThreadBuffer vk_thread_buffer = (VulkanThreadBuffer) {
         .callback = &debugCallback,
         .data_path = data_path,
         .flags = VULKAN_FLAG_RESIZABLE,
         .width = 800,
         .height = 600,
-        .command_buffer = &command_buffer
+        .command_buffer = &command_buffer,
+        .return_code = &vulkan_result
     };
 
-    HANDLE vulkan_thread;
-    vulkan_thread = CreateThread(NULL, 0, vulkanRun, &vk_thread_buffer, 0, 0);
-    ERROR_CATCH(!vulkan_thread) {
+#ifdef _WIN32
+    HANDLE vk_thread;
+    vk_thread = CreateThread(NULL, 0, vulkanRun, &vk_thread_buffer, 0, 0);
+    ERROR_CATCH(!vk_thread) {
         printf("failed to start vulkan thread!\n");
         return -1;
     }
+#else
+    
+#endif
 
-    u32 input_command;
-_loop:
-    scanf("%u", &input_command);
-    if(input_command == 10) goto _end_loop;
+    char input_command[128];
+    u32 command_code;
+    LOOP {
+        scanf("%s", input_command);
+        for(u32 i = 0; i < COMMAND_COUNT; i++) {
+            if(strcmp(c_command_names[i], input_command) == 0) {
+                command_code = i;
+                goto _parse_success;
+            }
+        }
+        printf("wrong command!\n");
 
-    command_buffer.thread_lock = 1;
-    command_buffer.command = input_command;
-    command_buffer.data = NULL;
-    command_buffer.thread_lock = 0;
-    goto _loop;
-_end_loop:
+_parse_success:
+        atomic_store(&command_buffer.thread_lock, 1);
+        command_buffer.thread_lock = 1;
+        command_buffer.command = command_code;
+        command_buffer.data = NULL;
+        atomic_store(&command_buffer.thread_lock, 0);
+        
+        if(command_code == COMMAND_CODE_EXIT) {
+            break;
+        }
+    }
 
-    return 0;
+#ifdef _WIN32
+    DWORD vk_join_result = WaitForSingleObject(vk_thread, I32_MAX);
+    if(vk_join_result == WAIT_TIMEOUT || vk_join_result == WAIT_FAILED) {
+        return -2;
+    }
+#endif
+    return (i32)vulkan_result;
 }

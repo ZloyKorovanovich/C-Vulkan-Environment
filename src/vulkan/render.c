@@ -654,6 +654,7 @@ result renderLoop(UpdateCallback update_callback) {
             continue;
         }
 #else // not defined(linux)
+        //@(Mitro): check VK_SUBOPTIMAL_KHR check
         if(image_acquire_result == VK_ERROR_OUT_OF_DATE_KHR) {
             vkDeviceWaitIdle(vulkan_context.device);
             recreateSwapchain();

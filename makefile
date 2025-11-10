@@ -16,4 +16,4 @@ compile_main:
 	gcc -c -Wall -O3 src/main.c -o $(out)/main.obj
 
 link:
-	gcc -o out/bin/main.exe $(out)/main.obj $(out)/vk_core.obj $(out)/vk_vram.obj $(out)/vk_resources.obj $(out)/vk_render.obj -L$(lib) -lglfw3 -lvulkan-1 -lgdi32 -luser32
+	gcc -o out/bin/main.exe $(out)/main.obj $(out)/vk_core.obj $(out)/vk_vram.obj $(out)/vk_resources.obj $(out)/vk_render.obj $(out)/vulkan.obj -L$(lib) -lglfw3 -lvulkan-1 -lgdi32 -luser32
