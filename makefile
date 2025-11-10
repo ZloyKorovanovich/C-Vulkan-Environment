@@ -3,11 +3,14 @@ out = out/bin
 inc = ext/inc
 lib = ext/lib
 
+cflags = -Wall -O3 -I$(inc)
+
 compile_vulkan:
-	gcc -c -Wall -O3 -I$(inc) src/vulkan/core.c -o $(out)/vk_core.obj
-	gcc -c -Wall -O3 -I$(inc) src/vulkan/vram.c -o $(out)/vk_vram.obj
-	gcc -c -Wall -O3 -I$(inc) src/vulkan/resources.c -o $(out)/vk_resources.obj
-	gcc -c -Wall -O3 -I$(inc) src/vulkan/render.c -o $(out)/vk_render.obj
+	gcc -c $(cflags) src/vulkan/core.c -o $(out)/vk_core.obj
+	gcc -c $(cflags) src/vulkan/vram.c -o $(out)/vk_vram.obj
+	gcc -c $(cflags) src/vulkan/resources.c -o $(out)/vk_resources.obj
+	gcc -c $(cflags) src/vulkan/render.c -o $(out)/vk_render.obj
+	gcc -c $(cflags) src/vulkan/vulkan.c -o $(out)/vulkan.obj
 
 compile_main:
 	gcc -c -Wall -O3 src/main.c -o $(out)/main.obj

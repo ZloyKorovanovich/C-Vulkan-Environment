@@ -3,8 +3,6 @@
 
 #include "../main.h"
 
-// ============================================== EXTERNAL INTERFACE
-// =================================================================
 
 typedef enum {
     VK_ERR_GLFW_INIT = 1,
@@ -71,21 +69,33 @@ typedef enum {
     VULKAN_FLAG_RESIZABLE = BIT(2),
 } VulkanFlags;
 
-result coreInit(u32 width, u32 height, u32 flags, EventCallback callback);
-void coreTerminate(void);
-result vramInit(EventCallback callback);
-void vramTerminate(void);
 
-result resourcesInit(const char* res_path);
-void resourcesTerminate(void);
+#ifdef INCLUDE_VULKAN_EXTERNAL
+// ============================================== EXTERNAL INTERFACE
+// =================================================================
 
-result renderInit(EventCallback event_callback);
-void renderTerminate(void);
-result renderLoop(UpdateCallback update_callback) ;
+typedef struct {
+    const ThreadCommandBuffer* command_buffer;
+    const char* data_path;
+    EventCallback callback;
+    u32 width;
+    u32 height;
+    u32 flags;
+} VulkanThreadBuffer;
 
+
+#ifdef _WIN32
+DWORD WINAPI vulkanRun(void* arg);
+#else
+void* vulkanRun(void* arg);
+#endif
+
+#endif //INCLUDE_VULKAN_EXTERNAL
+
+
+#ifdef INCLUDE_VULKAN_INTERNAL
 // ============================================== INTERNAL INTERFACE
 // =================================================================
-#ifdef INCLUDE_VULKAN_INTERNAL
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -215,6 +225,8 @@ typedef struct {
 // contexts are structs that are used to pass necessary data
 // between render sources
 
+typedef result (*UpdateCallback) (f64 time, f64 delta);
+
 typedef struct {
     GLFWwindow* window;
     VkInstance instance;
@@ -288,6 +300,20 @@ const VkShaderModule* getShaderModulesPtr(void);
 #ifdef INCLUDE_QUEUE_RENDER
 #define CURRENT_QUEUE_ID QUEUE_RENDER_ID
 #endif // defined(INCLUDE_QUEUE_GENERAL)
+
+
+result coreInit(u32 width, u32 height, u32 flags, EventCallback callback);
+void coreTerminate(void);
+result vramInit(EventCallback callback);
+void vramTerminate(void);
+
+result resourcesInit(const char* res_path);
+void resourcesTerminate(void);
+
+result renderInit(EventCallback event_callback);
+void renderTerminate(void);
+result renderLoop(UpdateCallback update_callback);
+void renderLoopExit(void);
 
 #endif // INCLUDE_VULKAN_INTERNAL
 #endif

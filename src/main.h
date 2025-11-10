@@ -5,6 +5,10 @@
 #include <malloc.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif // _WIN32
+
 // =========================================================== TYPES
 // =================================================================
 
@@ -59,8 +63,6 @@ typedef u32 Handle;
 
 #define DYN_ARG u32 argc, u64* argp
 #define ARG(n) argp[n]
-
-typedef b32 (*UpdateCallback) (f64 time, f64 delta);
 
 // ========================================================= PACKING
 // =================================================================
@@ -138,5 +140,21 @@ for(u32 i = 0; i < count; i++) {                        \
 }
 
 #define SAFE_DESTROY(ptr, func) if(ptr) {func; ptr = 0;}
+
+// ========================================================= THREADS
+// ================================================================= 
+
+typedef enum {
+    COMMAND_CODE_NONE = 0,
+    COMMAND_CODE_EXIT,
+} CommandCodes;
+
+
+typedef struct {
+    volatile u32 thread_lock;
+    u32 command;
+    void* data;
+} ThreadCommandBuffer;
+
 
 #endif
