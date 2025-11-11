@@ -3,6 +3,7 @@
 #include <windows.h>
 #include "common.h"
 
+//@(Mitro): needs adaptation for linux
 b32 upFolder(char* path) {
     u32 len = strlen(path);
     for(u32 i = len - 1; i > 0; i--) {
@@ -124,7 +125,7 @@ b32 processSpvFile(const SpvProcessingInfo* info, u64* iterator, char* caps_name
 
 int main(int argc, char** argv) {
     if(argc != 4) {
-        printf("incorrect number of arguments, should be: \".\\shader_compiler.exe <resource directory> <resource file> <header file>\"\n");
+        printf("incorrect number of arguments, should be: \"./shader_compiler.exe <resource directory> <resource file> <header file>\"\n");
         return 1;
     }
 
@@ -149,9 +150,9 @@ int main(int argc, char** argv) {
     char directory_search[256];
     char file_path[256];
     strcpy(directory, argv[1]);
-    strcat(directory, "\\");
+    strcat(directory, "/");
     strcpy(directory_search, argv[1]);
-    strcat(directory_search, "\\*");
+    strcat(directory_search, "/*");
 
     WIN32_FIND_DATA find_data;
     HANDLE find_handle;
