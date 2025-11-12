@@ -87,7 +87,7 @@ typedef struct {
 
 #ifdef _WIN32
 DWORD WINAPI vulkanRun(void* arg);
-#else
+#else // posix-like
 void* vulkanRun(void* arg);
 #endif
 

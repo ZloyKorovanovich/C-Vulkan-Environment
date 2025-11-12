@@ -1,14 +1,18 @@
 #ifndef _MAIN_INCLUDED
 #define _MAIN_INCLUDED
 
+#include <stdlib.h>
 #include <stdio.h>
-#include <malloc.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <windows.h>
-#endif // _WIN32
+#include <malloc.h>
+#else
+#include <alloca.h>
+#endif
 
 // =========================================================== TYPES
 // =================================================================
@@ -135,7 +139,7 @@ typedef enum {
 // ================================================================= 
 
 #define MIN_STACK 16
-#define ZE_ALLOCA(bytes) _alloca((MIN_STACK > bytes) ? MIN_STACK : bytes)
+#define ZE_ALLOCA(bytes) alloca((MIN_STACK > bytes) ? MIN_STACK : bytes)
 
 #define SET_MEMORY(ptr, value, count, i)                \
 for(u32 i = 0; i < count; i++) {                        \

@@ -24,8 +24,7 @@ _end:
     return return_code;
 }
 
-#ifdef _WIN32
-DWORD WINAPI vulkanRun(void* arg) {
+result vulkanMain(void* arg) {
     VulkanThreadBuffer thread_buffer = *((VulkanThreadBuffer*)arg);
     result call_result = CODE_SUCCESS;
     s_thread_command_buffer = thread_buffer.command_buffer;
@@ -41,6 +40,18 @@ _end:
     vramTerminate();
     coreTerminate();
     *thread_buffer.return_code = call_result;
+
+    return call_result;
+}
+
+#ifdef _WIN32
+DWORD WINAPI vulkanRun(void* arg) {
+    vulkanMain(arg);
     return 0;
+}
+#else
+void* vulkanRun(void* arg) {
+    vulkanMain(arg);
+    return NULL;
 }
 #endif

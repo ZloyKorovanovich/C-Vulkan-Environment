@@ -54,13 +54,17 @@ i32 main(i32 argc, char** argv) {
 
 #ifdef _WIN32
     HANDLE vk_thread;
-    vk_thread = CreateThread(NULL, 0, vulkanRun, &vk_thread_buffer, 0, 0);
+    vk_thread = CreateThread(NULL, 0, vulkanRun, (void*)&vk_thread_buffer, 0, 0);
     ERROR_CATCH(!vk_thread) {
         printf("failed to start vulkan thread!\n");
         return -1;
     }
 #else
-    
+    pthread_t vk_thread;
+    ERROR_CATCH(pthread_create(&vk_thread, NULL, vulkanRun, (void*)&vk_thread_buffer) != 0) {
+        printf("failed to start vulkan thread\n");
+        return -1;
+    }
 #endif
 
     char input_command[128];
@@ -91,6 +95,11 @@ _parse_success:
     DWORD vk_join_result = WaitForSingleObject(vk_thread, I32_MAX);
     if(vk_join_result == WAIT_TIMEOUT || vk_join_result == WAIT_FAILED) {
         return -2;
+    }
+#else
+    i32 vk_join_result = pthread_join(vk_thread, NULL); 
+    if(!(vk_join_result == 0 || vk_join_result == ESRCH)) {
+        return -1;
     }
 #endif
     return (i32)vulkan_result;
