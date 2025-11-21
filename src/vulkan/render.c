@@ -99,8 +99,6 @@ static DepthBuffer s_depth_buffer = (DepthBuffer){0};
 
 static EventCallback s_callback = NULL;
 
-static u32 s_render_loop_should_exit;
-
 // ================================================== SCREEN BUFFERS
 // =================================================================
 
@@ -533,7 +531,7 @@ result defaultUpdate(f64 time, f64 delta) {
 }
 
 void renderLoopExit(void) {
-    s_render_loop_should_exit = TRUE;
+    glfwSetWindowShouldClose(getVulkanContextPtr()->window, TRUE);
 }
 
 result renderLoop(UpdateCallback update_callback) {
@@ -630,13 +628,8 @@ result renderLoop(UpdateCallback update_callback) {
 #endif // defined(linux)
 
     // render loop
-    s_render_loop_should_exit = FALSE;
     while(!glfwWindowShouldClose(vulkan_context.window)) {
         glfwPollEvents();
-        if(EXPECT_F(s_render_loop_should_exit)) {
-            glfwSetWindowShouldClose(vulkan_context.window, TRUE);
-            continue;
-        }
         update_callback(0.0, 0.0);
 
         vkWaitForFences(vulkan_context.device, 1, &render_objects.frame_fence, VK_TRUE, U64_MAX);
