@@ -17,28 +17,46 @@ typedef struct {
 
 const ShaderInfo c_shader_infos[] = {
 	(ShaderInfo) {
-		.stage = VK_SHADER_STAGE_COMPUTE_BIT,
+		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
 		.code_offset = 0,
+		.code_size = 500,
+	},
+	(ShaderInfo) {
+		.stage = VK_SHADER_STAGE_VERTEX_BIT,
+		.code_offset = 500,
+		.code_size = 1608,
+	},
+	(ShaderInfo) {
+		.stage = VK_SHADER_STAGE_COMPUTE_BIT,
+		.code_offset = 2108,
 		.code_size = 864,
 	},
 	(ShaderInfo) {
+		.stage = VK_SHADER_STAGE_COMPUTE_BIT,
+		.code_offset = 2972,
+		.code_size = 1324,
+	},
+	(ShaderInfo) {
 		.stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-		.code_offset = 864,
+		.code_offset = 4296,
 		.code_size = 532,
 	},
 	(ShaderInfo) {
 		.stage = VK_SHADER_STAGE_VERTEX_BIT,
-		.code_offset = 1396,
-		.code_size = 1912,
+		.code_offset = 4828,
+		.code_size = 2000,
 	},
 };
 
-#define SHADER_COUNT 3
-#define SHADER_BUFFER_SIZE 3308LU
+#define SHADER_COUNT 6
+#define SHADER_BUFFER_SIZE 6828LU
 #endif
-#define SHADER_ID_DISTRIBUTION_C 0
-#define SHADER_ID_TRIANGLE_F 1
-#define SHADER_ID_TRIANGLE_V 2
+#define SHADER_ID_CAR_F 0
+#define SHADER_ID_CAR_V 1
+#define SHADER_ID_DISTRIBUTION_C 2
+#define SHADER_ID_TRAFFIC_C 3
+#define SHADER_ID_TRIANGLE_F 4
+#define SHADER_ID_TRIANGLE_V 5
 
 #endif
 

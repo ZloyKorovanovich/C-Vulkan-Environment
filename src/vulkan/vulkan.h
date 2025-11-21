@@ -100,6 +100,7 @@ void* vulkanRun(void* arg);
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <time.h>
 
 // =============================================== CONTROL CONSTANTS
 // =================================================================

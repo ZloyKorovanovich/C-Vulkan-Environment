@@ -17,6 +17,8 @@ struct Interpolators {
 
 [[vk::binding(0, 0)]] cbuffer per_object {
     uniform float4 _screen_size;
+    uniform float _time;
+    uniform float _delta;
 };
 [[vk::binding(1, 0)]] StructuredBuffer<float4> position_buffer;
 

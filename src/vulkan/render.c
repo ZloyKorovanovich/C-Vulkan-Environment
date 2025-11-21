@@ -374,6 +374,8 @@ ERROR_CATCH(call_result != CODE_SUCCESS) {  \
 
 typedef struct {
     float viewport_params[4];
+    float time;
+    float delta;
 } GlobalUniformBuffer;
 
 #define UNIFORM_BUFFER_USED_SIZE (sizeof(GlobalUniformBuffer))
@@ -400,6 +402,12 @@ typedef struct {
     VkBuffer device_uniform_buffer;
     VkBuffer device_position_buffer;
 } RenderBuffers;
+
+typedef struct {
+    VkRenderingAttachmentInfoKHR screen_color;
+    VkRenderingAttachmentInfoKHR screen_depth;
+    VkRenderingInfoKHR screen_target;
+} RenderTargets;
 
 u32 createRenderObjects(VkDevice device, const RenderBuffers* render_buffers, RenderObjects* const render_objects) {
     VkCommandBufferAllocateInfo cmbuffers_info = (VkCommandBufferAllocateInfo) {
@@ -526,6 +534,7 @@ void destroyRenderBuffers(VkDevice device, RenderBuffers* const render_buffers) 
     SAFE_DESTROY(render_buffers->device_handle, vramFree(render_buffers->device_handle))
 }
 
+
 result defaultUpdate(f64 time, f64 delta) {
     return TRUE;
 }
@@ -537,15 +546,19 @@ void renderLoopExit(void) {
 result renderLoop(UpdateCallback update_callback) {
     update_callback = update_callback ? update_callback : &defaultUpdate;
     result return_code = CODE_SUCCESS;
-    u32 call_result;
 
     VulkanContext vulkan_context = *getVulkanContextPtr();
     QueueContext queue_context = *getQueueContextPtr();
     ExtContext ext_context = *getExtensionContextPtr();
 
+    double time;
+    double delta_time;
+    VkViewport viewport;
+    u32 image_id;
+    u32 call_result;
+
     RenderBuffers render_buffers;
     RenderObjects render_objects;
-
     ERROR_CATCH_CALL(
         createRenderBuffers(vulkan_context.device, &queue_context, &render_buffers)
     )
@@ -553,35 +566,36 @@ result renderLoop(UpdateCallback update_callback) {
         createRenderObjects(vulkan_context.device, &render_buffers, &render_objects)
     )
 
-    VkRenderingAttachmentInfoKHR color_attachment = (VkRenderingAttachmentInfoKHR) {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
-        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE
-    };
-    VkRenderingAttachmentInfoKHR depth_attachment = (VkRenderingAttachmentInfoKHR) {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
-        .clearValue = (VkClearValue) {
-            .depthStencil = (VkClearDepthStencilValue){
-                .depth = 1.0
-            }
+// ===================================================== RENDER INFO
+    RenderTargets render_targets = (RenderTargets) {
+        .screen_color = (VkRenderingAttachmentInfoKHR) {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE
         },
-        .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE
-    };
-    VkRenderingInfoKHR vk_rendeirng_info = (VkRenderingInfoKHR) {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attachment,
-        .layerCount = 1,
-        .pDepthAttachment = &depth_attachment
+        .screen_depth = (VkRenderingAttachmentInfoKHR) {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+            .clearValue = (VkClearValue) {
+                .depthStencil = (VkClearDepthStencilValue){
+                    .depth = 1.0
+                }
+            },
+            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+        },
+        .screen_target = (VkRenderingInfoKHR) {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &render_targets.screen_color,
+            .layerCount = 1,
+            .pDepthAttachment = &render_targets.screen_depth
+        }
     };
     
-    VkViewport viewport;
-    u32 image_id;
 
-    // write scriptor sets
+// ================================================= DESCRIPTOR SETS
     VkDescriptorBufferInfo descriptor_uniform_buffer_info = (VkDescriptorBufferInfo) {
         .buffer = render_buffers.device_uniform_buffer,
         .offset = 0,
@@ -617,7 +631,18 @@ result renderLoop(UpdateCallback update_callback) {
         }
     };
     vkUpdateDescriptorSets(vulkan_context.device, 2, descriptor_set_writes, 0, NULL);
-    
+
+// =================================================== TIME COUNTERS
+#ifdef _WIN32
+    LARGE_INTEGER win_last_time;
+    LARGE_INTEGER win_current_time;
+    LARGE_INTEGER win_cpu_frequency;
+    QueryPerformanceCounter(&win_last_time);
+#endif
+    time = 0;
+    delta_time = 0;
+
+// @(Mitro): was tested on debian kali linux, and might be redundant
 #ifdef linux
 #define _WINDOW_MIN_SIZE 16
     int last_width, last_height;
@@ -627,11 +652,21 @@ result renderLoop(UpdateCallback update_callback) {
     last_height = MAX(_WINDOW_MIN_SIZE, current_height);
 #endif // defined(linux)
 
-    // render loop
-    while(!glfwWindowShouldClose(vulkan_context.window)) {
-        glfwPollEvents();
-        update_callback(0.0, 0.0);
 
+// =================================================== RENDER_LOOP
+    while(!glfwWindowShouldClose(vulkan_context.window)) {
+// =============================================================== FRAME START
+        glfwPollEvents();
+// =============================================================== TIME COUNTERS
+#ifdef _WIN32
+        QueryPerformanceCounter(&win_current_time);
+        QueryPerformanceFrequency(&win_cpu_frequency);
+        delta_time = (double)(win_current_time.QuadPart - win_last_time.QuadPart) / (double)win_cpu_frequency.QuadPart;
+        time += delta_time;
+        win_last_time = win_current_time;
+#endif
+        update_callback(time, delta_time);
+// =============================================================== IMAGE ACQUIRE
         vkWaitForFences(vulkan_context.device, 1, &render_objects.frame_fence, VK_TRUE, U64_MAX);
         VkResult image_acquire_result = vkAcquireNextImageKHR(vulkan_context.device, getSwapchainContextPtr()->swapchain, U64_MAX, render_objects.image_available_semaphore, NULL, &image_id);
         
@@ -656,40 +691,48 @@ result renderLoop(UpdateCallback update_callback) {
             continue;
         }
 #endif
-
-        vk_rendeirng_info.renderArea = (VkRect2D) {
+// =============================================================== SETUP DATA FOR FRAME
+        render_targets.screen_color.imageView = getSwapchainContextPtr()->views[image_id];
+        render_targets.screen_depth.imageView = s_depth_buffer.view; // always the same
+        render_targets.screen_target.renderArea = (VkRect2D) {
             .extent = getSwapchainContextPtr()->descriptor.extent,
             .offset = (VkOffset2D){0}
         };
         viewport = (VkViewport) {
-            .width = (float)vk_rendeirng_info.renderArea.extent.width,
-            .height = (float)vk_rendeirng_info.renderArea.extent.height,
+            .width = (float)render_targets.screen_target.renderArea.extent.width,
+            .height = (float)render_targets.screen_target.renderArea.extent.height,
             .maxDepth = 1.0f,
             .minDepth = 0.0f,
             .x = 0,
             .y = 0
         };
-
         render_objects.image_top_barrier.image = getSwapchainContextPtr()->images[image_id];
         render_objects.image_bottom_barrier.image = getSwapchainContextPtr()->images[image_id];
-            
+
         GlobalUniformBuffer gubuffer_struct = (GlobalUniformBuffer) {
-            .viewport_params = {viewport.x, viewport.y, viewport.width, viewport.height}
+            .viewport_params = {viewport.x, viewport.y, viewport.width, viewport.height},
+            .time = (float)time,
+            .delta = (float)delta_time
         };
+
         ERROR_CATCH(!vramWriteToAllocation(render_buffers.host_handle, (VramWriteDscr[]){{.src = &gubuffer_struct, .size = sizeof(GlobalUniformBuffer)}})) {
             _INVOKE_CALLBACK(VK_ERR_GLOBAL_UNIFORM_BUFFER_WRITE)
         }
         
+// =============================================================== COMMAND BUFFER BEGIN
         VkCommandBufferBeginInfo command_buffer_begin_info = (VkCommandBufferBeginInfo) {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .flags = 0,
             .pInheritanceInfo = NULL
         };
+
         vkResetFences(vulkan_context.device, 1, &render_objects.frame_fence);
         vkResetCommandBuffer(render_objects.cmd_buffer, 0);
         vkBeginCommandBuffer(render_objects.cmd_buffer, &command_buffer_begin_info);//@(Mitro): should chekc error if fails
 
-        
+// =============================================================== TRANSFER BUFFERS
+// @(Mitro): generaly thats a bad place for that, as later, when data becomes bigger we plan on using async transfer queue
+
         VkBufferCopy buffer_copy = (VkBufferCopy) {
             .dstOffset = 0,
             .srcOffset = 0,
@@ -702,7 +745,7 @@ result renderLoop(UpdateCallback update_callback) {
             0, 0, NULL, 0, NULL, 0, NULL
         );
 
-        // distribution pass
+// =============================================================== DISTRIBUTION PASS
         vkCmdBindDescriptorSets(render_objects.cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, s_pipeline_layouts[PIPELINE_DISTRIBUTION_ID], 0, 1, s_descriptor_sets, 0, NULL);
         vkCmdBindDescriptorSets(render_objects.cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipeline_layouts[PIPELINE_TRIANGLE_ID], 0, 1, s_descriptor_sets, 0, NULL);
 
@@ -718,24 +761,23 @@ result renderLoop(UpdateCallback update_callback) {
             render_objects.cmd_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
             0, 0, NULL, 0, NULL, 1, &render_objects.image_top_barrier
         );
-        color_attachment.imageView = getSwapchainContextPtr()->views[image_id];
-        depth_attachment.imageView = s_depth_buffer.view;
 
-        ext_context.cmd_begin_rendering(render_objects.cmd_buffer, &vk_rendeirng_info);
+// =============================================================== RENDERING ON SCREEN
+        ext_context.cmd_begin_rendering(render_objects.cmd_buffer, &render_targets.screen_target);
         
         vkCmdBindPipeline(render_objects.cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipelines[PIPELINE_TRIANGLE_ID]);
         vkCmdSetViewport(render_objects.cmd_buffer, 0, 1, &viewport);
-        vkCmdSetScissor(render_objects.cmd_buffer, 0, 1, &vk_rendeirng_info.renderArea);
+        vkCmdSetScissor(render_objects.cmd_buffer, 0, 1, &render_targets.screen_target.renderArea);
 
         vkCmdDraw(render_objects.cmd_buffer, 3 * 64, 1, 0, 0);
-        //... DRAW here
 
-        ext_context.cmd_end_rendering(render_objects.cmd_buffer);
+        ext_context.cmd_end_rendering(render_objects.cmd_buffer); 
         vkCmdPipelineBarrier(
             render_objects.cmd_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
             0, 0, NULL, 0, NULL, 1, &render_objects.image_bottom_barrier
         );
 
+// =============================================================== END COMMAND BUFFER & SUBMIT
         vkEndCommandBuffer(render_objects.cmd_buffer);
         VkSubmitInfo submit_info = (VkSubmitInfo) {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
