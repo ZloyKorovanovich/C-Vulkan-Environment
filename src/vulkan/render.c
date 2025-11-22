@@ -79,9 +79,13 @@ typedef struct {
     u64 handle;
 } DepthBuffer;
 
-#define PIPELINE_COUNT 2
-#define PIPELINE_DISTRIBUTION_ID 0
-#define PIPELINE_TRIANGLE_ID 1
+typedef enum {
+    PIPELINE_DISTRIBUTION_ID = 0,
+    PIPELINE_TRIANGLE_ID,
+    PIPELINE_DEFAULT_MESH_ID,
+
+    PIPELINE_COUNT
+} PipelineIDs;
 
 static void* s_pipeline_buffer = NULL; 
 static VkPipeline* s_pipelines = NULL;
@@ -332,7 +336,7 @@ u32 createDescriptorSets(VkDevice device, VkDescriptorPool pool, VkDescriptorSet
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS
+                .stageFlags = VK_SHADER_STAGE_ALL
             },
             (VkDescriptorSetLayoutBinding) {
                 .binding = 1,
@@ -882,10 +886,10 @@ result renderInit(EventCallback event_callback) {
 
     const VkShaderModule* shader_modules = getShaderModulesPtr();
     ERROR_CATCH_CALL(
-        createTrianglePipeline(vulkan_context.device, shader_modules, s_pipelines + PIPELINE_TRIANGLE_ID, s_pipeline_layouts + PIPELINE_TRIANGLE_ID)
+        createDistributionPipeline(vulkan_context.device, shader_modules, s_pipelines + PIPELINE_DISTRIBUTION_ID, s_pipeline_layouts + PIPELINE_DISTRIBUTION_ID)
     )
     ERROR_CATCH_CALL(
-        createDistributionPipeline(vulkan_context.device, shader_modules, s_pipelines + PIPELINE_DISTRIBUTION_ID, s_pipeline_layouts + PIPELINE_DISTRIBUTION_ID)
+        createTrianglePipeline(vulkan_context.device, shader_modules, s_pipelines + PIPELINE_TRIANGLE_ID, s_pipeline_layouts + PIPELINE_TRIANGLE_ID)
     )
 
 _end:
